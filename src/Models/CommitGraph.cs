@@ -34,6 +34,8 @@ namespace SourceGit.Models
                 Pens.Add(new Pen(c.ToUInt32(), thickness));
 
             s_penCount = colors.Count;
+            for (var i = 1; i < Bookmarks.Brushes.Length; i++)
+                Pens.Add(new Pen(Bookmarks.Brushes[i], thickness));
         }
 
         public class Path(int color, bool isHighlighted)
@@ -73,7 +75,7 @@ namespace SourceGit.Models
         public List<Link> Links { get; } = [];
         public List<Dot> Dots { get; } = [];
 
-        public static CommitGraph GenerateFiltered(List<Commit> allCommits, List<Commit> visibleCommits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory = false, bool reserveHeadLane = true)
+        public static CommitGraph GenerateFiltered(List<Commit> allCommits, List<Commit> visibleCommits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory = false, bool reserveHeadLane = true, int bookmark = 0)
         {
             var visible = new HashSet<string>();
             foreach (var commit in visibleCommits)
@@ -153,15 +155,15 @@ namespace SourceGit.Models
                 }
             }
 
-            return Generate(visibleCommits, firstParentOnlyEnabled, highlighting, highlightExtraCommits, hasWorkingDirectory, reserveHeadLane, parents);
+            return Generate(visibleCommits, firstParentOnlyEnabled, highlighting, highlightExtraCommits, hasWorkingDirectory, reserveHeadLane, parents, bookmark);
         }
 
-        public static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory = false, bool reserveHeadLane = true)
+        public static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory = false, bool reserveHeadLane = true, int bookmark = 0)
         {
-            return Generate(commits, firstParentOnlyEnabled, highlighting, highlightExtraCommits, hasWorkingDirectory, reserveHeadLane, null);
+            return Generate(commits, firstParentOnlyEnabled, highlighting, highlightExtraCommits, hasWorkingDirectory, reserveHeadLane, null, bookmark);
         }
 
-        private static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory, bool reserveHeadLane, Dictionary<string, List<string>> parentOverrides)
+        private static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory, bool reserveHeadLane, Dictionary<string, List<string>> parentOverrides, int bookmark)
         {
             const double unitWidth = 12;
             const double halfWidth = 6;
@@ -172,7 +174,8 @@ namespace SourceGit.Models
             var unsolved = new List<PathHelper>();
             var ended = new List<PathHelper>();
             var offsetY = -halfHeight;
-            var colorPicker = new ColorPicker();
+            var headColor = commits.Exists(x => x.IsCurrentHead) ? GetBookmarkColor(bookmark) : -1;
+            var colorPicker = new ColorPicker(headColor);
             var defHighlighting = highlighting == CommitGraphHighlighting.All;
 
             // Keep HEAD's first-parent ancestry in the first lane, even when other
@@ -182,7 +185,7 @@ namespace SourceGit.Models
             var headCommit = commits.Find(x => x.IsCurrentHead);
             if (reserveHeadLane && headCommit != null)
             {
-                headLane = new PathHelper(headCommit.SHA, defHighlighting, colorPicker.Next(), new Point(10, -halfHeight));
+                headLane = new PathHelper(headCommit.SHA, defHighlighting, headColor >= 0 ? headColor : colorPicker.Next(), new Point(10, -halfHeight));
                 headLane.Branches = headCommit.Decorators.FindAll(x => x.IsBranch);
                 unsolved.Add(headLane);
             }
@@ -191,6 +194,7 @@ namespace SourceGit.Models
             {
                 var parents = parentOverrides != null && parentOverrides.TryGetValue(commit.SHA, out var projected) ? projected : commit.Parents;
                 PathHelper major = null;
+                var isBookmarkedHead = commit.IsCurrentHead && headColor >= 0;
 
                 // Update current y offset
                 offsetY += unitHeight;
@@ -293,7 +297,8 @@ namespace SourceGit.Models
 
                     if (parents.Count > 0)
                     {
-                        major = new PathHelper(parents[0], isHighlighted, colorPicker.Next(), new Point(offsetX, offsetY));
+                        var color = isBookmarkedHead ? headColor : colorPicker.Next();
+                        major = new PathHelper(parents[0], isHighlighted, color, new Point(offsetX, offsetY));
                         unsolved.Add(major);
                         temp.Paths.Add(major.Path);
                     }
@@ -310,7 +315,7 @@ namespace SourceGit.Models
                 var branches = commit.Decorators.FindAll(x => x.IsBranch);
                 if (major != null && branches.Count > 0)
                 {
-                    if (major.HasBranch)
+                    if (major.HasBranch && !isBookmarkedHead)
                     {
                         // A named branch can start on an existing line without a fork.
                         // Split its color at the branch tip, preserving the lane and highlighting.
@@ -332,9 +337,17 @@ namespace SourceGit.Models
                 if (major != null && branches.Count > 0)
                     major.Branches = branches;
 
+                if (isBookmarkedHead && major != null && major.Path.Color != headColor)
+                {
+                    colorPicker.Recycle(major.Path.Color);
+                    major.ChangeColor(headColor);
+                    if (parents.Count > 0)
+                        temp.Paths.Add(major.Path);
+                }
+
                 // Calculate link position of this commit.
                 var position = new Point(major?.LastX ?? offsetX, offsetY);
-                var dotColor = major?.Path.Color ?? 0;
+                var dotColor = major?.Path.Color ?? (isBookmarkedHead ? headColor : 0);
                 var anchor = new Dot() { Center = position, Color = dotColor, IsHighlighted = isHighlighted };
                 if (commit.IsCurrentHead)
                     anchor.Type = DotType.Head;
@@ -452,10 +465,25 @@ namespace SourceGit.Models
             return temp;
         }
 
-        private class ColorPicker
+        private static int GetBookmarkColor(int bookmark)
+        {
+            if (Bookmarks.Get(bookmark) is not ISolidColorBrush brush)
+                return -1;
+
+            for (var i = 0; i < s_penCount; i++)
+            {
+                if (Pens[i].Brush is ISolidColorBrush graphBrush && graphBrush.Color == brush.Color)
+                    return i;
+            }
+
+            return s_penCount + bookmark - 1;
+        }
+
+        private class ColorPicker(int reservedColor)
         {
             public int Next(int exclude = -1)
             {
+                var reservedCount = s_penCount > 1 && reservedColor >= 0 && reservedColor < s_penCount ? 1 : 0;
                 int color;
                 do
                 {
@@ -467,14 +495,14 @@ namespace SourceGit.Models
 
                     color = _colorsQueue.Dequeue();
                 }
-                while (s_penCount > 1 && color == exclude);
+                while ((reservedCount > 0 && color == reservedColor) || (s_penCount - reservedCount > 1 && color == exclude));
 
                 return color;
             }
 
             public void Recycle(int idx)
             {
-                if (!_colorsQueue.Contains(idx))
+                if (idx < s_penCount && idx != reservedColor && !_colorsQueue.Contains(idx))
                     _colorsQueue.Enqueue(idx);
             }
 

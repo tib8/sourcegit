@@ -249,6 +249,7 @@
                                                      FontSize="12"
                                                      VerticalAlignment="Center"
                                                      UseGraphColor="{Binding IsHighlightedInGraph, Mode=OneWay}"
+                                                     GraphColor="{Binding Color, Mode=OneWay}"
                                                      UseCompactBranchNames="{Binding Source={x:Static vm:Preferences.Instance}, Path=UseCompactBranchNamesInGraph}"
                                                      HasSingleRemote="{Binding $parent[v:Histories].HasSingleRemote}"/>
 
@@ -424,6 +425,7 @@
                                                  FontSize="12"
                                                  VerticalAlignment="Center"
                                                  ShowBranchSummary="True"
+                                                 GraphColor="{Binding Color, Mode=OneWay}"
                                                  UseGraphColor="{Binding IsHighlightedInGraph, Mode=OneWay}">
                             <v:CommitRefsPresenter.ShowBranchContext>
                               <MultiBinding Converter="{x:Static BoolConverters.Or}">

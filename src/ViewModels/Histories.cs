@@ -951,6 +951,11 @@ namespace SourceGit.ViewModels
                 GenerateGraph(DisplayedCommits);
         }
 
+        public void RefreshGraph()
+        {
+            GenerateGraph(DisplayedCommits);
+        }
+
         private void GenerateGraph(List<Models.Commit> commits)
         {
             var firstParentOnly = _repo.UIStates.HistoryShowFlags.HasFlag(Models.HistoryShowFlags.FirstParentOnly);
@@ -964,8 +969,8 @@ namespace SourceGit.ViewModels
             }
 
             var graph = IsQuickSearchFilterActive ?
-                Models.CommitGraph.GenerateFiltered(_commits, commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, Preferences.Instance.WorkingDirectoryHeadMode != 0) :
-                Models.CommitGraph.Generate(commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, Preferences.Instance.WorkingDirectoryHeadMode != 0);
+                Models.CommitGraph.GenerateFiltered(_commits, commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, Preferences.Instance.WorkingDirectoryHeadMode != 0, _repo.Bookmark) :
+                Models.CommitGraph.Generate(commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, Preferences.Instance.WorkingDirectoryHeadMode != 0, _repo.Bookmark);
             if (IsWorkingDirectoryVisible)
             {
                 WorkingDirectory.LeftMargin = graph.Dots[0].Center.X + 14;
