@@ -420,16 +420,18 @@ namespace SourceGit.Models
         }
 
         private static int s_penCount = 0;
-        // Paul Tol's vibrant qualitative scheme, in the recommended allocation order.
+        // Paul Tol's light qualitative scheme, in the recommended allocation order.
         // https://sronpersonalpages.nl/~pault/#sec:qualitative
         // Gray is reserved for paths outside the active graph highlighting.
         private static readonly List<Color> s_defaultPenColors = [
-            Color.Parse("#EE7733"), // Orange
-            Color.Parse("#0077BB"), // Blue
-            Color.Parse("#33BBEE"), // Cyan
-            Color.Parse("#EE3377"), // Magenta
-            Color.Parse("#CC3311"), // Red
-            Color.Parse("#009988"), // Teal
+            Color.Parse("#77AADD"), // Light blue
+            Color.Parse("#EE8866"), // Orange
+            Color.Parse("#EEDD88"), // Light yellow
+            Color.Parse("#FFAABB"), // Pink
+            Color.Parse("#99DDFF"), // Light cyan
+            Color.Parse("#44BB99"), // Mint
+            Color.Parse("#BBCC33"), // Pear
+            Color.Parse("#AAAA00"), // Olive
         ];
     }
 }
