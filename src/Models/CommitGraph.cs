@@ -420,18 +420,20 @@ namespace SourceGit.Models
         }
 
         private static int s_penCount = 0;
-        // Paul Tol's light qualitative scheme, in the recommended allocation order.
-        // https://sronpersonalpages.nl/~pault/#sec:qualitative
+        // Paul Tol's discrete rainbow 12-color subset, omitting the lightest and darkest purple.
+        // https://sronpersonalpages.nl/~pault/#sec:sequential
         // Gray is reserved for paths outside the active graph highlighting.
         private static readonly List<Color> s_defaultPenColors = [
-            Color.Parse("#77AADD"), // Light blue
-            Color.Parse("#EE8866"), // Orange
-            Color.Parse("#EEDD88"), // Light yellow
-            Color.Parse("#FFAABB"), // Pink
-            Color.Parse("#99DDFF"), // Light cyan
-            Color.Parse("#44BB99"), // Mint
-            Color.Parse("#BBCC33"), // Pear
-            Color.Parse("#AAAA00"), // Olive
+            Color.Parse("#AE76A3"), // Purple
+            Color.Parse("#1965B0"), // Dark blue
+            Color.Parse("#5289C7"), // Blue
+            Color.Parse("#7BAFDE"), // Light blue
+            Color.Parse("#4EB265"), // Green
+            Color.Parse("#CAE0AB"), // Light green
+            Color.Parse("#F7F056"), // Yellow
+            Color.Parse("#F4A736"), // Amber
+            Color.Parse("#E8601C"), // Orange
+            Color.Parse("#DC050C"), // Red
         ];
     }
 }
