@@ -15,6 +15,11 @@ internal static class Program
     private static void Main()
     {
         CommitGraph.SetDefaultPens();
+        var bookmarkColors = Bookmarks.Brushes.Skip(1).Cast<ISolidColorBrush>().Select(x => x.Color).ToHashSet();
+        Check(CommitGraph.Pens.Take(10).All(x => bookmarkColors.Contains(((ISolidColorBrush)x.Brush).Color)),
+            "every default history-tree color is available as a bookmark");
+        Check(Bookmarks.Brushes.Take(8).SequenceEqual(new IBrush[] { null, Brushes.Red, Brushes.Orange, Brushes.Gold, Brushes.ForestGreen, Brushes.DarkCyan, Brushes.DeepSkyBlue, Brushes.Purple }),
+            "existing saved bookmark indices keep their original colors");
         CheckColorsAndHighlighting();
         CheckOlderHead();
         CheckFallbacks();
@@ -169,6 +174,17 @@ internal static class Program
         try
         {
             App.BuildAvaloniaApp().SetupWithoutStarting();
+            var selector = new SourceGit.Views.BookmarkSelector();
+            foreach (var width in new[] { 200, 80 })
+            {
+                selector.Measure(new Size(width, double.PositiveInfinity));
+                var boxes = (List<Rect>)typeof(SourceGit.Views.BookmarkSelector)
+                    .GetField("_hitBoxes", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(selector);
+                Check(boxes.Count == Bookmarks.Brushes.Length && boxes.All(x => x.Right <= selector.DesiredSize.Width && x.Bottom <= selector.DesiredSize.Height),
+                    "all bookmark options remain reachable when the picker wraps in a narrow dialog");
+                Check(boxes.Select(x => x.Y).Distinct().Count() > 1 && !boxes.SelectMany((a, i) => boxes.Skip(i + 1).Select(b => a.Intersects(b))).Any(x => x),
+                    "wrapped bookmark rows have separate non-overlapping click targets");
+            }
             var launcher = new Launcher(null);
             typeof(App).GetField("_launcher", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(Application.Current, launcher);
             var node = new RepositoryNode { Id = fixture, Name = "Fixture", IsRepository = true, Bookmark = 6 };

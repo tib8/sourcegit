@@ -35,13 +35,6 @@ namespace SourceGit.Views
             else
                 _icon.Transform = new MatrixTransform(_icon.Transform.Value * transform);
 
-            var x = 2.0;
-            for (var i = 0; i < Models.Bookmarks.Brushes.Length; i++)
-            {
-                var hitBox = new Rect(x - 2.5, 2.5, 18, 20);
-                _hitBoxes.Add(hitBox);
-                x += 26;
-            }
         }
 
         public override void Render(DrawingContext context)
@@ -59,7 +52,7 @@ namespace SourceGit.Views
                     context.DrawRectangle(selectedBorder, hitBox, 3);
 
                 var bursh = Models.Bookmarks.Get(i) ?? defaultBrush;
-                using (context.PushTransform(Matrix.CreateTranslation(hitBox.X + 3, 5)))
+                using (context.PushTransform(Matrix.CreateTranslation(hitBox.X + 3, hitBox.Y + 2.5)))
                     context.DrawGeometry(bursh, null, _icon);
             }
         }
@@ -96,7 +89,15 @@ namespace SourceGit.Views
 
         protected override Size MeasureOverride(Size availableSize)
         {
-            return new Size(8 * 14 + 7 * 12 + 4, 24);
+            var count = Models.Bookmarks.Brushes.Length;
+            var columns = double.IsInfinity(availableSize.Width) ? 8 : Math.Clamp((int)((availableSize.Width + 8) / 26), 1, 8);
+            columns = Math.Min(columns, count);
+            _hitBoxes.Clear();
+            for (var i = 0; i < count; i++)
+                _hitBoxes.Add(new Rect(i % columns * 26 - 0.5, i / columns * 26 + 2.5, 18, 20));
+
+            var rows = (count + columns - 1) / columns;
+            return new Size(columns * 26 - 8, rows * 26 - 2);
         }
 
         private int _bookmark = 0;
