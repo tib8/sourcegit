@@ -36,6 +36,12 @@ namespace SourceGit.Models
             s_penCount = colors.Count;
             for (var i = 1; i < Bookmarks.Brushes.Length; i++)
                 Pens.Add(new Pen(Bookmarks.Brushes[i], thickness));
+
+            s_colorDistances = new double[Pens.Count, Pens.Count];
+            for (var i = 0; i < Pens.Count; i++)
+                for (var j = 0; j < i; j++)
+                    s_colorDistances[i, j] = s_colorDistances[j, i] = GraphColorContrast.Distance(
+                        ((ISolidColorBrush)Pens[i].Brush).Color, ((ISolidColorBrush)Pens[j].Brush).Color);
         }
 
         public class Path(int color, bool isHighlighted)
@@ -273,7 +279,7 @@ namespace SourceGit.Models
                             offsetX += unitWidth;
 
                             // Create new curve for parent commit that not includes before
-                            var l = new PathHelper(parentHash, isHighlighted, colorPicker.Next(), position, new Point(offsetX, position.Y + halfHeight));
+                            var l = new PathHelper(parentHash, isHighlighted, colorPicker.Next(dotColor), position, new Point(offsetX, position.Y + halfHeight));
                             unsolved.Add(l);
                             temp.Paths.Add(l.Path);
                         }
@@ -320,20 +326,46 @@ namespace SourceGit.Models
             public int Next(int exclude = -1)
             {
                 var reservedCount = s_penCount > 1 && reservedColor >= 0 && reservedColor < s_penCount ? 1 : 0;
-                int color;
-                do
+                if (_colorsQueue.Count == 0)
                 {
-                    if (_colorsQueue.Count == 0)
-                    {
-                        for (var i = 0; i < s_penCount; i++)
-                            _colorsQueue.Enqueue(i);
-                    }
-
-                    color = _colorsQueue.Dequeue();
+                    for (var i = 0; i < s_penCount; i++)
+                        _colorsQueue.Enqueue(i);
                 }
-                while ((reservedCount > 0 && color == reservedColor) || (s_penCount - reservedCount > 1 && color == exclude));
 
-                return color;
+                var reference = exclude >= 0 ? exclude : _lastColor >= 0 ? _lastColor : reservedColor;
+                var best = -1;
+                var bestScore = double.MinValue;
+                var bestIsNew = false;
+                foreach (var color in _colorsQueue)
+                {
+                    if ((reservedCount > 0 && color == reservedColor) || (s_penCount - reservedCount > 1 && color == exclude))
+                        continue;
+                    var isNew = !_used.Contains(color);
+                    var score = reference >= 0 ? s_colorDistances[reference, color] : 0;
+                    if (_lastColor >= 0)
+                        score = Math.Min(score, s_colorDistances[_lastColor, color]);
+                    if (best < 0 || (isNew && !bestIsNew) || (isNew == bestIsNew && score > bestScore))
+                    {
+                        best = color;
+                        bestScore = score;
+                        bestIsNew = isNew;
+                    }
+                }
+                if (best < 0)
+                {
+                    _colorsQueue.Clear();
+                    return Next(exclude);
+                }
+                var count = _colorsQueue.Count;
+                for (var i = 0; i < count; i++)
+                {
+                    var color = _colorsQueue.Dequeue();
+                    if (color != best)
+                        _colorsQueue.Enqueue(color);
+                }
+                _used.Add(best);
+                _lastColor = best;
+                return best;
             }
 
             public void Recycle(int idx)
@@ -343,6 +375,8 @@ namespace SourceGit.Models
             }
 
             private Queue<int> _colorsQueue = new Queue<int>();
+            private HashSet<int> _used = [];
+            private int _lastColor = -1;
         }
 
         private class PathHelper
@@ -485,6 +519,7 @@ namespace SourceGit.Models
         }
 
         private static int s_penCount = 0;
+        private static double[,] s_colorDistances;
         private static readonly List<Color> s_defaultPenColors = [
             Colors.Orange,
             Colors.ForestGreen,

@@ -7,6 +7,7 @@ internal static class Program
     private static void Main()
     {
         CommitGraph.SetDefaultPens();
+        CheckDistinctTransitions();
         CheckStackedBranches();
         CheckSharedBase();
         CheckMergeLane();
@@ -138,6 +139,31 @@ internal static class Program
                     "adjacent stacked branches stay distinct when the palette is recycled");
                 Check(graph.Paths.Count == (colorCount == 1 ? 1 : stack.Count),
                     "a single-color palette does not create redundant path segments");
+            }
+        }
+        finally
+        {
+            CommitGraph.SetDefaultPens();
+        }
+    }
+
+    private static void CheckDistinctTransitions()
+    {
+        try
+        {
+            foreach (var second in new[] { Avalonia.Media.Colors.Lime, Avalonia.Media.Color.Parse("#CD0000") })
+            {
+                CommitGraph.SetPens([Avalonia.Media.Colors.Red, second, Avalonia.Media.Colors.Blue], 2);
+                var root = new Commit { SHA = "root" };
+                var branchBase = Commit("base", root, "refs/heads/base");
+                var head = Commit("head", branchBase, "HEAD -> refs/heads/main");
+                CommitGraph.Generate([head, branchBase, root], false, CommitGraphHighlighting.All, []);
+                Check(head.Color == 0 && branchBase.Color == 2,
+                    "a branch boundary prefers blue over a red-green or nearly identical red transition");
+                var feature = Commit("feature", root, "refs/heads/feature");
+                head.Parents = [root.SHA, feature.SHA];
+                CommitGraph.Generate([head, feature, root], false, CommitGraphHighlighting.All, []);
+                Check(feature.Color == 2, "a fork prefers a large color change from its parent segment");
             }
         }
         finally
