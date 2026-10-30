@@ -13,6 +13,13 @@ namespace SourceGit.Models
             [1.255528, -0.076749, -0.178779, -0.078411, 0.930809, 0.147602, 0.004733, 0.691367, 0.303900],
         ];
 
+        public static double NormalDistance(Color first, Color second)
+        {
+            var a = Perceptual(first, s_transforms[0]);
+            var b = Perceptual(second, s_transforms[0]);
+            return (a.L - b.L) * (a.L - b.L) + (a.A - b.A) * (a.A - b.A) + (a.B - b.B) * (a.B - b.B);
+        }
+
         public static double Distance(Color first, Color second)
         {
             var minimum = double.MaxValue;

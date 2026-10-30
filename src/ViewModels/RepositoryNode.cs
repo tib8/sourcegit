@@ -12,6 +12,7 @@ namespace SourceGit.ViewModels
     public class RepositoryNodeMinimalInfo
     {
         public string FriendlyName { get; set; } = string.Empty;
+        [JsonConverter(typeof(Models.BookmarkConverter))]
         public int Bookmark { get; set; } = 0;
     }
 
@@ -33,6 +34,7 @@ namespace SourceGit.ViewModels
             set => SetProperty(ref _name, value);
         }
 
+        [JsonConverter(typeof(Models.BookmarkConverter))]
         public int Bookmark
         {
             get => _bookmark;

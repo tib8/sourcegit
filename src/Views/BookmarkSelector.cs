@@ -53,7 +53,7 @@ namespace SourceGit.Views
 
                 var bursh = Models.Bookmarks.Get(i) ?? defaultBrush;
                 using (context.PushTransform(Matrix.CreateTranslation(hitBox.X + 3, hitBox.Y + 2.5)))
-                    context.DrawGeometry(bursh, null, _icon);
+                    context.DrawGeometry(bursh, new Pen(defaultBrush, 0.5), _icon);
             }
         }
 

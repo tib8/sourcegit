@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Data;
@@ -19,10 +21,9 @@ internal static class Program
     {
         CommitGraph.SetDefaultPens();
         var bookmarkColors = Bookmarks.Brushes.Skip(1).Cast<ISolidColorBrush>().Select(x => x.Color).ToHashSet();
-        Check(CommitGraph.Pens.Take(10).All(x => bookmarkColors.Contains(((ISolidColorBrush)x.Brush).Color)),
+        Check(CommitGraph.Pens.Take(Bookmarks.Colors.Count).All(x => bookmarkColors.Contains(((ISolidColorBrush)x.Brush).Color)),
             "every default history-tree color is available as a bookmark");
-        Check(Bookmarks.Brushes.Take(8).SequenceEqual(new IBrush[] { null, Brushes.Red, Brushes.Orange, Brushes.Gold, Brushes.ForestGreen, Brushes.DarkCyan, Brushes.DeepSkyBlue, Brushes.Purple }),
-            "existing saved bookmark indices keep their original colors");
+        CheckBookmarkMigration();
         CheckColorsAndHighlighting();
         CheckOlderHead();
         CheckFallbacks();
@@ -109,7 +110,7 @@ internal static class Program
             "an empty bookmarked history stays empty");
 
         head.ParseDecorators("HEAD -> refs/heads/main");
-        var first = CommitGraph.Generate([head, root], false, CommitGraphHighlighting.All, [], 7);
+        var first = CommitGraph.Generate([head, root], false, CommitGraphHighlighting.All, [], 5);
         var firstColor = BrushColor(first.Dots[0].Color);
         CommitGraph.Generate([head, root], false, CommitGraphHighlighting.All, [], 1);
         Check(BrushColor(first.Dots[0].Color) == firstColor,
@@ -146,7 +147,7 @@ internal static class Program
     {
         try
         {
-            foreach (var colors in new List<Color>[] { [Colors.Red, Colors.Orange], [Colors.Red, Colors.Orange, Colors.Gold] })
+            foreach (var colors in new List<Color>[] { [Bookmarks.Colors[0], Colors.Orange], [Bookmarks.Colors[0], Colors.Orange, Colors.Gold] })
             {
                 CommitGraph.SetPens(colors, 2);
                 var root = new Commit { SHA = "root" };
@@ -154,7 +155,7 @@ internal static class Program
                 var branchBase = Commit("base", root, "refs/heads/base");
                 var feature = Commit("feature", branchBase, "refs/heads/feature");
                 var graph = CommitGraph.Generate([feature, branchBase, head, root], false, CommitGraphHighlighting.All, [], 1);
-                Check(BrushColor(head.Color) == Colors.Red && feature.Color != head.Color && branchBase.Color != head.Color,
+                Check(BrushColor(head.Color) == Bookmarks.Colors[0] && feature.Color != head.Color && branchBase.Color != head.Color,
                     "stacked side branches preserve the color reserved for the current branch");
                 Check(colors.Count == 2 || feature.Color != branchBase.Color,
                     "stacked side branches remain distinct when the palette has another available color");
@@ -168,6 +169,33 @@ internal static class Program
         }
     }
 
+    private static void CheckBookmarkMigration()
+    {
+        var context = (JsonSerializerContext)typeof(App).Assembly.GetType("SourceGit.JsonCodeGen")
+            .GetProperty("Default").GetValue(null);
+        int[] expected = [0, 5, 4, 4, 3, 1, 2, 6, 2, 3, 5, 4, 4, 1, 1];
+        for (var old = 0; old < expected.Length; old++)
+        {
+            var json = "{\"RepositoryNodes\":[{\"Id\":\"fixture\",\"Bookmark\":" + old + ",\"SubNodes\":[{\"Bookmark\":" + old + "}]}]}";
+            var preferences = (Preferences)JsonSerializer.Deserialize(json, typeof(Preferences), context);
+            var node = preferences.RepositoryNodes.Single();
+            Check(node.Bookmark == expected[old] && node.SubNodes.Single().Bookmark == expected[old],
+                "saved repositories and nested groups recover the perceptually closest palette color");
+            var saved = JsonSerializer.Serialize(preferences, typeof(Preferences), context);
+            var restored = (Preferences)JsonSerializer.Deserialize(saved, typeof(Preferences), context);
+            Check(restored.RepositoryNodes.Single().Bookmark == expected[old], "saving and reloading does not migrate an already migrated bookmark again");
+            var minimal = (RepositoryNodeMinimalInfo)JsonSerializer.Deserialize("{\"Bookmark\":" + old + "}", typeof(RepositoryNodeMinimalInfo), context);
+            Check(minimal.Bookmark == expected[old], "unmanaged repository metadata migrates the same legacy colors");
+        }
+        for (var color = 1; color <= Bookmarks.Colors.Count; color++)
+        {
+            var saved = JsonSerializer.Serialize(new RepositoryNodeMinimalInfo { Bookmark = color }, typeof(RepositoryNodeMinimalInfo), context);
+            var restored = (RepositoryNodeMinimalInfo)JsonSerializer.Deserialize(saved, typeof(RepositoryNodeMinimalInfo), context);
+            Check(JsonDocument.Parse(saved).RootElement.GetProperty("Bookmark").GetInt32() == 100 + color && restored.Bookmark == color,
+                "new palette choices have unambiguous persisted IDs");
+        }
+    }
+
     private static void CheckLiveBookmarks()
     {
         var fixture = Path.Combine(Path.GetTempPath(), "sourcegit-bookmark-colors-" + Guid.NewGuid().ToString("N"));
@@ -177,6 +205,48 @@ internal static class Program
         try
         {
             App.BuildAvaloniaApp().SetupWithoutStarting();
+            var neutralColors = new List<Color>();
+            foreach (var theme in new[] { "Light", "Dark" })
+            {
+                App.SetTheme(theme, null);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                var icon = new SourceGit.Views.Bookmark { Value = 0 };
+                var window = new Window { Width = 48, Height = 48, Opacity = 0, ShowInTaskbar = false, Content = icon };
+                window.Show();
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                icon.Measure(new Size(16, 16));
+                icon.Arrange(new Rect(0, 0, 16, 16));
+                var drawing = new DrawingGroup();
+                using (var context = drawing.Open())
+                    icon.Render(context);
+                var geometry = GeometryDrawings(drawing).Single();
+                var neutral = ((ISolidColorBrush)geometry.Brush).Color;
+                neutralColors.Add(neutral);
+                icon.Value = 1;
+                drawing = new DrawingGroup();
+                using (var context = drawing.Open())
+                    icon.Render(context);
+                geometry = GeometryDrawings(drawing).Single();
+                Check(((ISolidColorBrush)geometry.Brush).Color == Bookmarks.Colors[0] && ((ISolidColorBrush)geometry.Pen.Brush).Color == neutral,
+                    "colored bookmarks retain the palette hue and a theme-contrasting outline in both themes");
+                window.Close();
+            }
+            Check(neutralColors[0] != neutralColors[1] && neutralColors[0].R < neutralColors[1].R,
+                "the neutral bookmark switches from a dark foreground to a light foreground with the theme");
+            var metadataDir = Path.Combine(fixture, ".git");
+            Directory.CreateDirectory(metadataDir);
+            int[] legacyExpected = [5, 4, 4, 3, 1, 2, 6];
+            for (var legacy = 1; legacy <= 7; legacy++)
+            {
+                File.WriteAllText(Path.Combine(metadataDir, "sourcegit.node"), "{\"FriendlyName\":\"Legacy\",\"Bookmark\":" + legacy + "}");
+                var legacyNode = new RepositoryNode();
+                legacyNode.LoadMinimalInfo(metadataDir);
+                Check(legacyNode.Bookmark == legacyExpected[legacy - 1], "legacy unmanaged repository files load the nearest Tol color");
+                legacyNode.SaveMinimalInfo(metadataDir);
+                var reloaded = new RepositoryNode();
+                reloaded.LoadMinimalInfo(metadataDir);
+                Check(reloaded.Bookmark == legacyNode.Bookmark, "unmanaged metadata save/load preserves the migrated choice");
+            }
             foreach (var dialog in new UserControl[] { new SourceGit.Views.EditRepositoryNode(), new SourceGit.Views.OpenLocalRepository(), new SourceGit.Views.Clone() })
             foreach (var width in new[] { 320, 600 })
             {
@@ -198,7 +268,7 @@ internal static class Program
                     .GetField("_hitBoxes", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(selector);
                 Check(boxes.Count == Bookmarks.Brushes.Length && boxes.All(x => x.Right <= selector.DesiredSize.Width && x.Bottom <= selector.DesiredSize.Height),
                     "all bookmark options remain reachable when the picker wraps in a narrow dialog");
-                Check(boxes.Select(x => x.Y).Distinct().Count() > 1 && !boxes.SelectMany((a, i) => boxes.Skip(i + 1).Select(b => a.Intersects(b))).Any(x => x),
+                Check(!boxes.SelectMany((a, i) => boxes.Skip(i + 1).Select(b => a.Intersects(b))).Any(x => x),
                     "wrapped bookmark rows have separate non-overlapping click targets");
             }
             var launcher = new Launcher(null);
@@ -219,15 +289,15 @@ internal static class Program
             Check(BrushColor(head.Color) == ((ISolidColorBrush)Bookmarks.Get(6)).Color,
                 "the history view uses its repository tab's bookmark color");
             var original = histories.Graph;
-            node.Bookmark = 7;
-            Check(!ReferenceEquals(original, histories.Graph) && BrushColor(head.Color) == ((ISolidColorBrush)Bookmarks.Get(7)).Color,
+            node.Bookmark = 5;
+            Check(!ReferenceEquals(original, histories.Graph) && BrushColor(head.Color) == ((ISolidColorBrush)Bookmarks.Get(5)).Color,
                 "editing a repository bookmark immediately regenerates its open graph");
             Check(!label.IsMeasureValid && label.GraphColor == head.Color,
                 "editing a bookmark immediately invalidates the visible branch badge color");
             label.Measure(new Size(200, 26));
             var items = (List<SourceGit.Views.CommitRefsPresenter.RenderItem>)typeof(SourceGit.Views.CommitRefsPresenter)
                 .GetField("_items", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(label);
-            Check(((ISolidColorBrush)items[0].Brush).Color == ((ISolidColorBrush)Bookmarks.Get(7)).Color,
+            Check(((ISolidColorBrush)items[0].Brush).Color == ((ISolidColorBrush)Bookmarks.Get(5)).Color,
                 "the refreshed branch badge uses the new bookmark color");
             node.Bookmark = 0;
             Check(head.Color == 0, "clearing the bookmark restores the default graph color");
@@ -244,6 +314,16 @@ internal static class Program
                 throw new InvalidOperationException("Fixture must stay inside the temporary directory");
             Directory.Delete(fixture, true);
         }
+    }
+
+    private static IEnumerable<GeometryDrawing> GeometryDrawings(Drawing drawing)
+    {
+        if (drawing is GeometryDrawing geometry)
+            yield return geometry;
+        if (drawing is DrawingGroup group)
+            foreach (var child in group.Children)
+                foreach (var item in GeometryDrawings(child))
+                    yield return item;
     }
 
     private static Color BrushColor(int color) => ((ISolidColorBrush)CommitGraph.Pens[color].Brush).Color;

@@ -29,11 +29,12 @@ namespace SourceGit.Views
             if (_icon == null)
                 LoadIcon();
 
-            var brush = Models.Bookmarks.Get(_value) ?? (this.FindResource("Brush.FG1") as IBrush);
+            var foreground = this.FindResource("Brush.FG1") as IBrush;
+            var brush = Models.Bookmarks.Get(_value) ?? foreground;
             var startX = (Bounds.Width - 12.0) * 0.5;
             var startY = (Bounds.Height - 12.0) * 0.5;
             using (context.PushTransform(Matrix.CreateTranslation(startX, startY)))
-                context.DrawGeometry(brush, null, _icon);
+                context.DrawGeometry(brush, new Pen(foreground, 0.5), _icon);
         }
 
         protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)

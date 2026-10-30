@@ -23,7 +23,7 @@ namespace SourceGit.Models
 
         public static void SetDefaultPens(double thickness = 2)
         {
-            SetPens(s_defaultPenColors, thickness);
+            SetPens(Bookmarks.Colors, thickness);
         }
 
         public static void SetPens(List<Color> colors, double thickness)
@@ -520,17 +520,5 @@ namespace SourceGit.Models
 
         private static int s_penCount = 0;
         private static double[,] s_colorDistances;
-        private static readonly List<Color> s_defaultPenColors = [
-            Colors.Orange,
-            Colors.ForestGreen,
-            Colors.Turquoise,
-            Colors.Olive,
-            Colors.Magenta,
-            Colors.Red,
-            Colors.Khaki,
-            Colors.Lime,
-            Colors.RoyalBlue,
-            Colors.Teal,
-        ];
     }
 }
