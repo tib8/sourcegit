@@ -2,10 +2,13 @@ using System.Reflection;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Data;
+using Avalonia.Controls;
+using Avalonia.LogicalTree;
 using SourceGit;
 using SourceGit.Models;
 using SourceGit.ViewModels;
 using Commit = SourceGit.Models.Commit;
+using Decorator = SourceGit.Models.Decorator;
 
 internal static class Program
 {
@@ -174,6 +177,19 @@ internal static class Program
         try
         {
             App.BuildAvaloniaApp().SetupWithoutStarting();
+            foreach (var dialog in new UserControl[] { new SourceGit.Views.EditRepositoryNode(), new SourceGit.Views.OpenLocalRepository(), new SourceGit.Views.Clone() })
+            foreach (var width in new[] { 320, 600 })
+            {
+                var content = (Control)dialog.Content;
+                content.Measure(new Size(width, double.PositiveInfinity));
+                content.Arrange(new Rect(0, 0, width, content.DesiredSize.Height));
+                var picker = dialog.GetLogicalDescendants().OfType<SourceGit.Views.BookmarkSelector>().Single();
+                var targets = (List<Rect>)typeof(SourceGit.Views.BookmarkSelector)
+                    .GetField("_hitBoxes", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(picker);
+                var row = ((Grid)picker.Parent).RowDefinitions[Grid.GetRow(picker)];
+                Check(picker.Bounds.Height >= targets.Max(x => x.Bottom) && row.ActualHeight >= picker.Bounds.Height,
+                    "repository edit, open, and clone dialogs expand to show every bookmark row");
+            }
             var selector = new SourceGit.Views.BookmarkSelector();
             foreach (var width in new[] { 200, 80 })
             {
