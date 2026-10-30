@@ -12,6 +12,9 @@ namespace SourceGit.Models
 {
     public class RepositorySettings
     {
+        public Dictionary<string, AzureDevOps.PullRequestDefaults> AzureDevOpsPullRequests { get; set; } = [];
+        public Dictionary<string, AzureDevOps.PendingCreation> AzureDevOpsPendingRequests { get; set; } = [];
+
         public string DefaultRemote
         {
             get;
@@ -98,6 +101,11 @@ namespace SourceGit.Models
 
         public void Save()
         {
+            TrySave();
+        }
+
+        public bool TrySave()
+        {
             try
             {
                 var content = JsonSerializer.Serialize(this, JsonCodeGen.Default.RepositorySettings);
@@ -109,10 +117,11 @@ namespace SourceGit.Models
                     File.Move(tmpfile, _file, true);
                     _orgHash = hash;
                 }
+                return true;
             }
             catch
             {
-                // Ignore save errors
+                return false;
             }
         }
 

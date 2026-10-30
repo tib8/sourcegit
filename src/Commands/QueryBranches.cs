@@ -15,7 +15,7 @@ namespace SourceGit.Commands
         {
             WorkingDirectory = repo;
             Context = repo;
-            Args = "branch -l --all -v --format=\"%(refname)%00%(committerdate:unix)%00%(objectname)%00%(HEAD)%00%(upstream)%00%(upstream:trackshort)%00%(worktreepath)\"";
+            Args = "branch -l --all -v --format=\"%(refname)%00%(committerdate:unix)%00%(objectname)%00%(HEAD)%00%(upstream)%00%(upstream:trackshort)%00%(worktreepath)%00%(authoremail)\"";
         }
 
         public async Task<List<Models.Branch>> GetResultAsync()
@@ -25,12 +25,13 @@ namespace SourceGit.Commands
             if (!rs.IsSuccess)
                 return branches;
 
+            var userEmail = await new Config(WorkingDirectory).GetAsync("user.email").ConfigureAwait(false);
             var lines = rs.StdOut.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
             var mismatched = new HashSet<string>();
             var remotes = new Dictionary<string, Models.Branch>();
             foreach (var line in lines)
             {
-                var b = ParseLine(line, mismatched);
+                var b = ParseLine(line, mismatched, userEmail);
                 if (b != null)
                 {
                     branches.Add(b);
@@ -60,10 +61,10 @@ namespace SourceGit.Commands
             return branches;
         }
 
-        private Models.Branch ParseLine(string line, HashSet<string> mismatched)
+        private Models.Branch ParseLine(string line, HashSet<string> mismatched, string userEmail)
         {
             var parts = line.Split('\0');
-            if (parts.Length != 7)
+            if (parts.Length != 8)
                 return null;
 
             var branch = new Models.Branch();
@@ -117,6 +118,9 @@ namespace SourceGit.Commands
                 mismatched.Add(branch.FullName);
 
             branch.WorktreePath = parts[6];
+            var authorEmail = parts[7].Trim().Trim('<', '>').Trim();
+            branch.IsHeadAuthoredByUser = !string.IsNullOrWhiteSpace(userEmail) &&
+                string.Equals(authorEmail, userEmail.Trim(), StringComparison.OrdinalIgnoreCase);
             return branch;
         }
     }

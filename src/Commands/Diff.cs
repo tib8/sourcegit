@@ -66,7 +66,10 @@ namespace SourceGit.Commands
                 proc.Start();
 
                 using var ms = new MemoryStream();
-                await proc.StandardOutput.BaseStream.CopyToAsync(ms, CancellationToken).ConfigureAwait(false);
+                // Drain both redirected pipes so a verbose Git error cannot block the process.
+                await Task.WhenAll(
+                    proc.StandardOutput.BaseStream.CopyToAsync(ms, CancellationToken),
+                    proc.StandardError.BaseStream.CopyToAsync(Stream.Null, CancellationToken)).ConfigureAwait(false);
 
                 if (ms.TryGetBuffer(out var buffer))
                 {

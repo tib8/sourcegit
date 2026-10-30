@@ -35,6 +35,10 @@ internal static class Program
         CommitDetail detail = null;
         try
         {
+            var failedDiff = new Diff(fixture,
+                new SourceGit.Models.DiffOption("missing-before", "missing-after", new SourceGit.Models.Change { Path = "example.txt" }),
+                4, false, true).ReadAsync().WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            Check(failedDiff.TextDiff == null, "failed diff drains Git error output without hanging");
             Git(fixture, "init", "-b", "main");
             Git(fixture, "config", "user.name", "Test Author");
             Git(fixture, "config", "user.email", "test@example.com");

@@ -14,6 +14,7 @@ namespace SourceGit.Models
         public string FullName { get; set; }
         public ulong CommitterDate { get; set; }
         public string Head { get; set; }
+        public bool IsHeadAuthoredByUser { get; set; }
         public bool IsLocal { get; set; }
         public bool IsCurrent { get; set; }
         public bool IsDetachedHead { get; set; }

@@ -524,6 +524,8 @@ internal static class Program
         // These checks supply synthetic status snapshots; keep the live watcher
         // from replacing them with the fixture's actual files during UI pumping.
         using var watcherLock = repo.LockWatcher();
+        // Let refreshes already running when the watcher was locked finish first.
+        PumpUntil(() => !repo.IsRefreshing);
         var vm = repo.Histories;
         var pref = Preferences.Instance;
         var list = window.GetVisualDescendants().OfType<Views.HistoriesCommitList>().Single();

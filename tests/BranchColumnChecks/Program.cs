@@ -39,6 +39,7 @@ internal static class Program
             Git(fixture, "tag v1");
             Git(fixture, "update-ref refs/remotes/origin/main HEAD");
             repo = new Repository(false, fixture, Path.Combine(fixture, ".git"));
+            repo.UIStates.IsTreeColumnVisibleInHistory = false;
             repo.Open();
             window = new Window { Title = "SourceGit Branch Column Checks", Width = 1100, Height = 760,
                 Content = new Views.Repository { DataContext = repo } };
@@ -159,7 +160,9 @@ internal static class Program
         var column = list.Columns[5];
         var graph = window.GetVisualDescendants().OfType<Views.CommitGraph>().Single();
         var connections = window.GetVisualDescendants().OfType<Views.CommitBranchConnections>().Single();
-        Check(!vm.IsBranchesColumnVisible && !column.IsVisible, "branch column defaults to hidden");
+        Check(vm.IsBranchesColumnVisible && column.IsVisible, "branch column defaults to visible");
+        vm.IsBranchesColumnVisible = false;
+        PumpUntil(() => !column.IsVisible);
         Check(column.DisplayIndex < list.Columns[0].DisplayIndex &&
             !list.Columns.Any(x => x.IsVisible && x.DisplayIndex > column.DisplayIndex && x.DisplayIndex < list.Columns[0].DisplayIndex),
             "branch column is before the graph without changing source indexes");
@@ -181,7 +184,7 @@ internal static class Program
         PumpUntil(() => connections.Connections.Count == 1);
         var connection = connections.Connections[0];
         Check(connection.IsActive && connection.Start.Y == connection.End.Y, "active branch connects horizontally at full opacity");
-        var dot = vm.Graph.Dots[0];
+        var dot = vm.Graph.Dots.Single(x => x.Type == CommitGraph.DotType.Head);
         var expectedEnd = graph.TranslatePoint(new Point(dot.Center.X, dot.Center.Y * graph.Layout.RowHeight - graph.Layout.StartY), connections).Value;
         Check(connection.End == expectedEnd, "connection ends at the commit graph dot");
 

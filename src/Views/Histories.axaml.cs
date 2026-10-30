@@ -1885,6 +1885,10 @@ namespace SourceGit.Views
             submenu.Icon = this.CreateMenuIcon("Icons.Branch");
             submenu.Header = current.Name;
 
+            var createPR = AzureDevOpsPullRequestMenu.Create(this, repo, current);
+            if (createPR != null)
+                submenu.Items.Add(createPR);
+
             var visibility = new MenuItem();
             visibility.Classes.Add("filter_mode_switcher");
             visibility.Header = new ViewModels.FilterModeInGraph(repo, current);
@@ -1985,6 +1989,10 @@ namespace SourceGit.Views
             var submenu = new MenuItem();
             submenu.Icon = this.CreateMenuIcon("Icons.Branch");
             submenu.Header = branch.Name;
+
+            var createPR = AzureDevOpsPullRequestMenu.Create(this, repo, branch);
+            if (createPR != null)
+                submenu.Items.Add(createPR);
 
             var visibility = new MenuItem();
             visibility.Classes.Add("filter_mode_switcher");
@@ -2147,6 +2155,10 @@ namespace SourceGit.Views
             var submenu = new MenuItem();
             submenu.Icon = this.CreateMenuIcon("Icons.Branch");
             submenu.Header = name;
+
+            var createPR = AzureDevOpsPullRequestMenu.Create(this, repo, branch);
+            if (createPR != null)
+                submenu.Items.Add(createPR);
 
             var visibility = new MenuItem();
             visibility.Classes.Add("filter_mode_switcher");

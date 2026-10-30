@@ -4,6 +4,13 @@ The project uses the following third-party libraries or assets
 
 ## Packages
 
+### Microsoft.Identity.Client and Microsoft.Identity.Client.Extensions.Msal
+
+- **Source**: https://github.com/AzureAD/microsoft-authentication-library-for-dotnet
+- **Version**: 4.91.1
+- **License**: MIT License
+- **License Link**: https://github.com/AzureAD/microsoft-authentication-library-for-dotnet/blob/main/LICENSE
+
 ### AvaloniaUI
 
 - **Source**: https://github.com/AvaloniaUI/Avalonia

@@ -11,6 +11,8 @@ namespace SourceGit.ViewModels
 {
     public class Preferences : ObservableObject
     {
+        public AzureDevOps.ConnectionSettings AzureDevOpsConnection { get; set; } = new();
+
         [JsonIgnore]
         public static Preferences Instance
         {

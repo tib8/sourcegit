@@ -58,6 +58,7 @@
 * Workspace
 * Custom Action
 * Create PR on GitHub/Gitlab/Gitea/Gitee/Bitbucket...
+* [Native Azure DevOps pull requests](AZURE-DEVOPS-PULL-REQUESTS.md) with reviewers, draft and completion options, and remembered repository preferences
 * Using AI to generate commit message
 * Built-in conventional commit message helper.
 

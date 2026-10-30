@@ -1047,7 +1047,12 @@ namespace SourceGit.Views
             menu.Items.Add(createBranch);
             menu.Items.Add(createTag);
 
-            if (upstream != null)
+            var azureCreatePR = AzureDevOpsPullRequestMenu.Create(this, repo, branch);
+            if (azureCreatePR != null)
+            {
+                menu.Items.Add(azureCreatePR);
+            }
+            else if (branch.IsHeadAuthoredByUser && upstream != null)
             {
                 var remote = repo.Remotes.Find(x => x.Name.Equals(upstream.Remote, StringComparison.Ordinal));
                 if (remote != null && remote.TryGetCreatePullRequestURL(out var prURL, upstream.Name))
@@ -1374,7 +1379,12 @@ namespace SourceGit.Views
             menu.Items.Add(createTag);
 
             var remote = repo.Remotes.Find(x => x.Name.Equals(branch.Remote, StringComparison.Ordinal));
-            if (remote != null && remote.TryGetCreatePullRequestURL(out var prURL, branch.Name))
+            var azureCreatePR = AzureDevOpsPullRequestMenu.Create(this, repo, branch);
+            if (azureCreatePR != null)
+            {
+                menu.Items.Add(azureCreatePR);
+            }
+            else if (branch.IsHeadAuthoredByUser && remote != null && remote.TryGetCreatePullRequestURL(out var prURL, branch.Name))
             {
                 var createPR = new MenuItem();
                 createPR.Header = App.Text("BranchCM.CreatePR");

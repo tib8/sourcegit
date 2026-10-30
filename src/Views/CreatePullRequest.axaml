@@ -1,0 +1,156 @@
+<v:ChromelessWindow xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:vm="using:SourceGit.ViewModels"
+                    xmlns:ado="using:SourceGit.AzureDevOps"
+                    xmlns:v="using:SourceGit.Views"
+                    x:Class="SourceGit.Views.CreatePullRequest"
+                    x:DataType="vm:CreatePullRequest"
+                    x:Name="ThisControl"
+                    Title="{DynamicResource Text.CreatePR.Title}"
+                    Icon="/App.ico"
+                    Width="720" Height="820" MinWidth="520" MinHeight="480"
+                    WindowStartupLocation="CenterOwner">
+  <v:ChromelessWindow.Styles>
+    <Style Selector="TextBox"><Setter Property="MinHeight" Value="28"/><Setter Property="Padding" Value="7,4"/><Setter Property="CornerRadius" Value="3"/></Style>
+    <Style Selector="TextBlock.pr-status"><Setter Property="Foreground" Value="{DynamicResource Brush.FG1}"/></Style>
+    <Style Selector="TextBlock.pr-status.success"><Setter Property="Foreground" Value="{DynamicResource Brush.CreatePR.Success}"/></Style>
+    <Style Selector="TextBlock.pr-status.error"><Setter Property="Foreground" Value="{DynamicResource Brush.CreatePR.Error}"/></Style>
+    <Style Selector="TextBlock.pr-search-status"><Setter Property="Foreground" Value="{DynamicResource Brush.FG2}"/></Style>
+    <Style Selector="TextBlock.pr-search-status.error"><Setter Property="Foreground" Value="{DynamicResource Brush.CreatePR.Error}"/></Style>
+  </v:ChromelessWindow.Styles>
+  <Grid RowDefinitions="Auto,*,Auto,Auto">
+    <Grid Grid.Row="0" Height="30" IsVisible="{Binding !#ThisControl.UseSystemWindowFrame}">
+      <Border Background="{DynamicResource Brush.TitleBar}" PointerPressed="BeginMoveWindow"/>
+      <TextBlock Text="{DynamicResource Text.CreatePR.Title}" Classes="bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      <v:CaptionButtons HorizontalAlignment="Right" IsCloseButtonOnly="True" IsVisible="{OnPlatform True, macOS=False}"/>
+    </Grid>
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="22,18" Spacing="12">
+        <TextBlock Text="{Binding RepositoryLabel}" Classes="bold" TextWrapping="Wrap"/>
+        <Expander Header="{DynamicResource Text.CreatePR.Connection}" IsExpanded="{Binding ConnectionExpanded, Mode=TwoWay}" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsBusy}">
+          <StackPanel Spacing="8" Margin="0,8,0,0">
+            <TextBlock Text="{DynamicResource Text.CreatePR.AuthenticationMethod}"/>
+            <ComboBox ItemsSource="{Binding AuthenticationMethods}" SelectedIndex="{Binding AuthenticationMethod, Mode=TwoWay}" HorizontalAlignment="Stretch"/>
+            <StackPanel IsVisible="{Binding !UsePersonalAccessToken}" Spacing="8">
+              <TextBlock Text="{DynamicResource Text.CreatePR.ConnectionHelp}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+              <TextBlock Text="{DynamicResource Text.CreatePR.ClientId}"/>
+              <TextBox Text="{Binding ClientId, Mode=TwoWay}" Watermark="{DynamicResource Text.CreatePR.ClientIdHint}"/>
+              <TextBlock Text="{DynamicResource Text.CreatePR.Tenant}"/>
+              <TextBox Text="{Binding Tenant, Mode=TwoWay}"/>
+            </StackPanel>
+            <StackPanel IsVisible="{Binding UsePersonalAccessToken}" Spacing="8">
+              <TextBlock Text="{DynamicResource Text.CreatePR.TokenHelp}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+              <TextBox Text="{Binding PersonalAccessToken, Mode=TwoWay}" PasswordChar="●" MaxLength="1024" Watermark="{DynamicResource Text.CreatePR.TokenHint}"/>
+              <TextBlock Text="{DynamicResource Text.CreatePR.TokenStorage}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="flat primary" Content="{Binding ConnectLabel}" Click="OnSignIn"/>
+              <Button Classes="flat" Content="{DynamicResource Text.CreatePR.SignOut}" Click="OnSignOut" IsEnabled="{Binding HasAccount}"/>
+            </StackPanel>
+          </StackPanel>
+        </Expander>
+        <TextBlock Text="{Binding AccountName}" Foreground="{DynamicResource Brush.FG2}"/>
+        <TextBlock Text="{DynamicResource Text.CreatePR.SessionOnly}" IsVisible="{Binding SessionOnly}" TextWrapping="Wrap"/>
+        <Grid ColumnDefinitions="*,24,*">
+          <StackPanel Grid.Column="0" Spacing="4">
+            <TextBlock Text="{DynamicResource Text.CreatePR.Source}"/>
+            <TextBox Text="{Binding SourceBranch}" IsReadOnly="True"/>
+          </StackPanel>
+          <TextBlock Grid.Column="1" Text="→" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"/>
+          <StackPanel Grid.Column="2" Spacing="4">
+            <TextBlock Text="{DynamicResource Text.CreatePR.Target}"/>
+            <ComboBox x:Name="TargetBranch" ItemsSource="{Binding Branches}" SelectedItem="{Binding Target, Mode=OneWay}" SelectionChanged="OnTargetSelectionChanged" DropDownOpened="OnTargetDropDownOpened" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEdit}" PlaceholderText="{DynamicResource Text.CreatePR.SelectTarget}">
+              <ComboBox.ItemTemplate><DataTemplate x:DataType="ado:GitRef"><TextBlock Text="{Binding BranchName}"/></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+        </Grid>
+        <Border x:Name="ExistingPullRequestNotice" IsVisible="{Binding HasExistingPullRequest}" BorderBrush="{DynamicResource Brush.Border1}" BorderThickness="1" CornerRadius="3" Padding="12">
+          <StackPanel Spacing="8">
+            <TextBlock Text="{Binding ExistingPullRequestMessage}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding ExistingPullRequestTitle}" Classes="bold" TextWrapping="Wrap"/>
+            <TextBlock Text="{DynamicResource Text.CreatePR.ExistingPairHelp}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="OpenExistingPullRequest" Classes="flat primary" Content="{DynamicResource Text.CreatePR.OpenExisting}" Click="OnOpenExisting"/>
+              <Button Classes="flat" Content="{DynamicResource Text.CreatePR.CheckAgain}" Click="OnRetryLoading" IsEnabled="{Binding !HasActivity}"/>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+        <StackPanel x:Name="PullRequestForm" Spacing="10" IsEnabled="{Binding CanEditRequest}" IsVisible="{Binding !HasExistingPullRequest}">
+          <StackPanel Spacing="4">
+            <TextBlock Text="{DynamicResource Text.CreatePR.Subject}"/>
+            <TextBox Text="{Binding Title, Mode=TwoWay}" MaxLength="400"/>
+          </StackPanel>
+          <StackPanel Spacing="4">
+            <TextBlock Text="{DynamicResource Text.CreatePR.Description}"/>
+            <TextBox Text="{Binding Description, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="200"/>
+          </StackPanel>
+          <TextBlock Text="{DynamicResource Text.CreatePR.Reviewers}"/>
+          <TextBox x:Name="ReviewerSearchBox" Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Watermark="{DynamicResource Text.CreatePR.SearchReviewers}"/>
+          <TextBlock x:Name="ReviewerSearchStatus" Text="{Binding ReviewerSearchStatus}" Classes="pr-search-status" Classes.error="{Binding HasReviewerSearchError}" IsVisible="{Binding ReviewerSearchStatus.Length}" TextWrapping="Wrap"/>
+          <ScrollViewer IsVisible="{Binding SearchResults.Count}" MaxHeight="170" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="ReviewerSuggestions" ItemsSource="{Binding SearchResults}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="ado:Identity">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                    <StackPanel Grid.Column="0"><TextBlock Text="{Binding Label}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Foreground="{DynamicResource Brush.FG2}" TextWrapping="Wrap"/></StackPanel>
+                    <Button Grid.Column="1" Classes="flat" Content="{DynamicResource Text.CreatePR.AddReviewer}" Click="OnAddReviewer" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+          <ItemsControl ItemsSource="{Binding Reviewers}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PullRequestReviewer">
+                <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2">
+                  <StackPanel Grid.Column="0"><TextBlock Text="{Binding Name}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Foreground="{DynamicResource Brush.FG2}" TextWrapping="Wrap"/></StackPanel>
+                  <CheckBox Grid.Column="1" Content="{DynamicResource Text.CreatePR.Required}" IsChecked="{Binding IsRequired, Mode=TwoWay}" Margin="8,0"/>
+                  <Button Grid.Column="2" Classes="flat" Content="{DynamicResource Text.CreatePR.Remove}" Click="OnRemoveReviewer"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <CheckBox Content="{DynamicResource Text.CreatePR.Draft}" IsChecked="{Binding IsDraft, Mode=TwoWay}"/>
+          <Expander x:Name="CompletionOptions" HorizontalAlignment="Stretch" IsExpanded="{Binding CompletionExpanded, Mode=TwoWay}">
+            <Expander.Header>
+              <StackPanel Spacing="4">
+                <TextBlock Text="{DynamicResource Text.CreatePR.Completion}"/>
+                <TextBlock Text="{Binding CompletionSummary}" IsVisible="{Binding !CompletionExpanded}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+              </StackPanel>
+            </Expander.Header>
+            <StackPanel Spacing="8" Margin="0,8,0,0">
+              <CheckBox Content="{DynamicResource Text.CreatePR.AutoComplete}" IsChecked="{Binding AutoComplete, Mode=TwoWay}" IsEnabled="{Binding AutoCompleteAvailable}"/>
+              <TextBlock Text="{Binding AutoCompleteHelp}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+              <TextBlock Text="{DynamicResource Text.CreatePR.MergeStrategy}"/>
+              <ComboBox ItemsSource="{Binding MergeStrategies}" SelectedIndex="{Binding MergeStrategy, Mode=TwoWay}" HorizontalAlignment="Stretch"/>
+              <TextBlock Text="{Binding MergeHelp}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+              <CheckBox Content="{DynamicResource Text.CreatePR.DeleteBranch}" IsChecked="{Binding DeleteSourceBranch, Mode=TwoWay}"/>
+              <TextBlock Text="{DynamicResource Text.CreatePR.Help.Delete}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+              <StackPanel Spacing="4" IsVisible="{Binding IsSquash}">
+                <TextBlock Text="{DynamicResource Text.CreatePR.MergeMessage}"/>
+                <TextBox Text="{Binding MergeMessage, Mode=TwoWay}"/>
+                <TextBlock Text="{DynamicResource Text.CreatePR.Help.Message}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.FG2}"/>
+              </StackPanel>
+            </StackPanel>
+          </Expander>
+        </StackPanel>
+        <StackPanel IsVisible="{Binding HasPending}" Spacing="8">
+          <Button Classes="flat" Content="{DynamicResource Text.CreatePR.OpenRepository}" Click="OnOpenRepository" HorizontalAlignment="Left"/>
+          <CheckBox Content="{DynamicResource Text.CreatePR.RecoveryAcknowledged}" IsChecked="{Binding RecoveryAcknowledged, Mode=TwoWay}"/>
+          <Button Classes="flat" Content="{DynamicResource Text.CreatePR.ClearRecovery}" Click="OnClearRecovery" IsEnabled="{Binding CanClearRecovery}" HorizontalAlignment="Left"/>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+    <StackPanel Grid.Row="2" Margin="22,4" Spacing="4">
+      <ProgressBar IsIndeterminate="True" Height="3" IsVisible="{Binding HasActivity}"/>
+      <TextBlock x:Name="RequestStatus" Text="{Binding Status}" Classes="pr-status" Classes.success="{Binding IsSuccessful}" Classes.error="{Binding IsErrorStatus}" IsVisible="{Binding HasStatus}" TextWrapping="Wrap"/>
+      <SelectableTextBlock x:Name="RequestError" Text="{Binding Error}" IsVisible="{Binding HasError}" TextWrapping="Wrap" Foreground="{DynamicResource Brush.CreatePR.Error}"/>
+    </StackPanel>
+    <WrapPanel Grid.Row="3" HorizontalAlignment="Right" Margin="18,8,18,14">
+      <Button Classes="flat" Content="{DynamicResource Text.CreatePR.RetryConnection}" Click="OnRetryLoading" IsVisible="{Binding CanRetryLoading}" IsEnabled="{Binding !HasActivity}" Margin="4"/>
+      <Button Classes="flat" Content="{DynamicResource Text.CreatePR.Open}" Click="OnOpenResult" IsVisible="{Binding HasResultLink}" Margin="4"/>
+      <Button Classes="flat" Content="{DynamicResource Text.Close}" Click="OnClose" Margin="4"/>
+      <Button x:Name="CreatePullRequestButton" Classes="flat primary" Content="{Binding PrimaryLabel}" Click="OnCreate" IsEnabled="{Binding CanCreate}" IsVisible="{Binding !IsFinished}" Margin="4"/>
+    </WrapPanel>
+  </Grid>
+</v:ChromelessWindow>
