@@ -30,6 +30,7 @@ internal static class Program
             App.BuildAvaloniaApp().SetupWithoutStarting();
             App.SetLocale("en_US");
             CheckBranchSummaryRendering();
+            CheckDetachedHeadRendering();
             CheckGraphBranchContext();
             Git(fixture, "init -b main");
             Git(fixture, "config user.name Test");
@@ -120,6 +121,45 @@ internal static class Program
         label.Measure(new Size(double.PositiveInfinity, 26));
         Check(!label.BranchSummaryHasRemote && label.BranchSummarySuffixWidth == 0 && label.DesiredSize.Width > 84,
             "other ref presenters retain their existing rendering behavior");
+    }
+
+    private static void CheckDetachedHeadRendering()
+    {
+        var commit = new Commit();
+        commit.ParseDecorators("HEAD, tag: refs/tags/v1");
+        commit.GraphBranches.Add(new SourceGit.Models.Decorator { Type = DecoratorType.LocalBranchHead, Name = "main" });
+        var label = new Views.CommitRefsPresenter
+        {
+            ShowBranchSummary = true, ShowBranchContext = true, FontSize = 12, DataContext = commit,
+        };
+        label.Measure(new Size(180, 26));
+        Check(label.BranchSummaryText == "HEAD" && !label.IsContextBranchSummary && label.Opacity == 1,
+            "detached HEAD takes precedence over hovered or selected lane context");
+        Check(label.BranchSummaryToolTip == "HEAD" && commit.BranchToolTip == "HEAD",
+            "detached HEAD is included in branch label tooltips");
+        Check(label.BranchSummaryAdditionalCount == 0 && !label.BranchSummaryHasRemote,
+            "detached HEAD alone has no additional branches or remote icon");
+
+        var message = new Views.CommitRefsPresenter { ShowBranches = false, FontSize = 12, DataContext = commit };
+        message.Measure(new Size(500, 26));
+        Check(message.DecoratorAt(new Point(4, 4))?.Type == DecoratorType.Tag,
+            "separate branch column removes detached HEAD from subject while retaining tags");
+        message.ShowBranches = true;
+        message.Measure(new Size(500, 26));
+        Check(message.DecoratorAt(new Point(4, 4))?.Type == DecoratorType.CurrentCommitHead,
+            "hiding branch column restores detached HEAD in subject");
+
+        commit.Decorators.Clear();
+        commit.ParseDecorators("refs/heads/main, HEAD, refs/remotes/origin/main");
+        label.InvalidateMeasure();
+        label.Measure(new Size(180, 26));
+        Check(label.BranchSummaryText == "HEAD" && label.BranchSummaryAdditionalCount == 1 && !label.BranchSummaryHasRemote,
+            "detached HEAD remains primary alongside grouped local and remote branches");
+
+        label.DataContext = new SourceGit.Models.Decorator { Type = DecoratorType.CurrentCommitHead, Name = "HEAD" };
+        label.Measure(new Size(180, 26));
+        Check(label.BranchSummaryText == "HEAD" && label.BranchSummaryToolTip == "HEAD",
+            "single-decorator rows can display detached HEAD in the branch column");
     }
 
     private static void CheckGraphBranchContext()
@@ -259,6 +299,23 @@ internal static class Program
         PumpUntil(() => !column.IsVisible && graph.Margin.Left == 0 && connections.Connections.Count == 0);
         Check(messageRefs.ShowBranches && messageRefs.DecoratorAt(new Point(4, 4))?.IsBranch == true,
             "hiding the column restores message branch labels and graph position");
+
+        Git(fixture, "checkout --detach HEAD");
+        repo.RefreshAll();
+        PumpUntil(() => !vm.IsLoading && vm.Commits.Any(x => x.Decorators.Any(d => d.Type == DecoratorType.CurrentCommitHead)));
+        tip = vm.Commits.Single(x => x.IsCurrentHead);
+        tipRow = list.GetVisualDescendants().OfType<DataGridRow>().Single(x => ReferenceEquals(x.DataContext, tip));
+        message = tipRow.GetVisualDescendants().OfType<Views.CommitMessagePanel>().Single();
+        messageRefs = (Views.CommitRefsPresenter)message.Children[0];
+        Check(messageRefs.DecoratorAt(new Point(4, 4)) != null,
+            "detached checkout retains subject labels while branch column is hidden");
+        vm.IsBranchesColumnVisible = true;
+        PumpUntil(() => column.IsVisible && connections.Connections.Count == 1);
+        label = tipRow.GetVisualDescendants().OfType<Views.CommitRefsPresenter>().Single(x => x.ShowBranchSummary);
+        Check(label.BranchSummaryText == "HEAD" && connections.Connections[0].IsActive,
+            "detached checkout displays HEAD with an active graph connector in branch column");
+        Check(messageRefs.DecoratorAt(new Point(4, 4))?.Type == DecoratorType.Tag,
+            "detached checkout removes HEAD and branches from subject while preserving tags");
     }
 
     private static void MoveMouse(MouseDevice mouse, Window window, Point position)

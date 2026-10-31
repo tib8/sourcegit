@@ -16,5 +16,6 @@
         public string Name { get; set; } = "";
         public bool IsTag => Type == DecoratorType.Tag;
         public bool IsBranch => Type is DecoratorType.CurrentBranchHead or DecoratorType.LocalBranchHead or DecoratorType.RemoteBranchHead;
+        public bool IsBranchOrHead => IsBranch || Type == DecoratorType.CurrentCommitHead;
     }
 }

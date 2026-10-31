@@ -343,7 +343,7 @@ namespace SourceGit.Views
                 _ => [],
             };
             IsContextBranchSummary = ShowBranchSummary && ShowBranchContext && commit != null &&
-                !commit.Decorators.Exists(x => x.IsBranch) && commit.GraphBranches.Count > 0;
+                !commit.Decorators.Exists(x => x.IsBranchOrHead) && commit.GraphBranches.Count > 0;
             if (IsContextBranchSummary)
             {
                 // Show lane identity without presenting an ancestor as the branch tip.
@@ -356,7 +356,7 @@ namespace SourceGit.Views
             if (ShowBranchSummary)
             {
                 SetCurrentValue(OpacityProperty, IsContextBranchSummary ? 0.7 : 1.0);
-                var names = refs.FindAll(x => x.IsBranch).ConvertAll(x => x.Name);
+                var names = refs.FindAll(x => x.IsBranchOrHead).ConvertAll(x => x.Name);
                 SetAndRaise(BranchSummaryToolTipProperty, ref _branchSummaryToolTip, names.Count > 0 ? string.Join("\n", names) : null);
             }
             var branchCount = 0;
@@ -367,18 +367,19 @@ namespace SourceGit.Views
                 var localNames = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var decorator in refs)
                 {
-                    if (decorator.IsBranch)
+                    if (decorator.IsBranchOrHead)
                     {
                         if (decorator.Type is Models.DecoratorType.CurrentBranchHead or Models.DecoratorType.LocalBranchHead)
                             localNames.Add(decorator.Name);
-                        if (primary == null || decorator.Type < primary.Type)
+                        if (primary == null || decorator.Type == Models.DecoratorType.CurrentCommitHead ||
+                            (primary.Type != Models.DecoratorType.CurrentCommitHead && decorator.Type < primary.Type))
                             primary = decorator;
                     }
                 }
 
                 foreach (var decorator in refs)
                 {
-                    if (!decorator.IsBranch)
+                    if (!decorator.IsBranchOrHead)
                         continue;
 
                     if (decorator.Type == Models.DecoratorType.RemoteBranchHead)
@@ -429,7 +430,7 @@ namespace SourceGit.Views
                     continue;
 
                 var decorator = refs[i];
-                if (!showBranches && decorator.IsBranch)
+                if (!showBranches && decorator.IsBranchOrHead)
                     continue;
                 if (!showTags && decorator.Type == Models.DecoratorType.Tag)
                     continue;
