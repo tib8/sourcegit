@@ -19,10 +19,10 @@ namespace SourceGit.ViewModels
 
         public void SetBranch(Models.Branch branch, IBrush brush)
         {
-            Branch = branch is { IsDetachedHead: false } ? new Models.Decorator
+            Branch = branch != null ? new Models.Decorator
             {
-                Name = branch.Name,
-                Type = Models.DecoratorType.LocalBranchHead,
+                Name = branch.IsDetachedHead ? "HEAD" : branch.Name,
+                Type = branch.IsDetachedHead ? Models.DecoratorType.CurrentCommitHead : Models.DecoratorType.LocalBranchHead,
             } : null;
             BranchBrush = brush;
         }

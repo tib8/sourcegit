@@ -310,7 +310,8 @@ internal static class Program
         var commit = new Commit();
         Check(commit.BranchSummary.Length == 0 && commit.BranchToolTip == null, "undecorated commits have blank branch cells");
         commit.ParseDecorators("HEAD, tag: refs/tags/v1");
-        Check(commit.BranchSummary.Length == 0 && commit.BranchToolTip == null, "tags and detached HEAD are not branches");
+        Check(commit.BranchSummary.Length == 0 && commit.BranchToolTip == "HEAD", "detached HEAD is included in branch-column tooltips while tags are excluded");
+        commit.Decorators.Clear();
         commit.ParseDecorators("refs/remotes/origin/feature/topic");
         Check(commit.BranchSummary == "origin/feature/topic", "single remote branch retains its full name");
         commit.ParseDecorators("refs/heads/feature/topic");
@@ -356,8 +357,15 @@ internal static class Program
         PumpUntil(() => workingLabel.BranchSummaryText == "next-branch");
         Check(workingLabel.Opacity == 0.7, "working-directory branch changes preserve the badge opacity");
         vm.CurrentBranch = new Branch { IsDetachedHead = true };
+        PumpUntil(() => workingLabel.BranchSummaryText == "HEAD");
+        Check(workingLabel.Opacity == 0.7 && workingLabel.DecoratorAt(new Point(4, 4))?.Type == DecoratorType.CurrentCommitHead,
+            "detached working-directory HEAD uses the HEAD badge at 70 percent opacity");
+        Check(ReferenceEquals(workingLabel.BranchSummaryBrush, vm.WorkingDirectory.BranchBrush) && ToolTip.GetTip(workingCell) as string == "HEAD",
+            "detached working-directory HEAD retains graph color and updates its tooltip");
+        vm.CurrentBranch = null;
         PumpUntil(() => workingLabel.BranchSummaryRight == 0);
-        Check(workingLabel.BranchSummaryRight == 0, "detached HEAD does not display a false working-directory branch");
+        Check(vm.WorkingDirectory.Branch == null && ToolTip.GetTip(workingCell) == null,
+            "missing current branch clears the working-directory badge and tooltip");
         vm.CurrentBranch = activeBranch;
         PumpUntil(() => workingLabel.BranchSummaryText == "main");
         var cell = list.GetVisualDescendants().OfType<Border>().Single(x => x.DataContext is Commit && ToolTip.GetTip(x) as string == "main");

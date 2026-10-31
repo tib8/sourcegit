@@ -1064,7 +1064,7 @@ namespace SourceGit.Views
                             end.Value.Y >= 0 && end.Value.Y < BranchConnections.Bounds.Height)
                         {
                             var branch = label.DecoratorAt(new Point(0, 0));
-                            var active = branch?.Type == Models.DecoratorType.CurrentBranchHead ||
+                            var active = branch?.Type is Models.DecoratorType.CurrentBranchHead or Models.DecoratorType.CurrentCommitHead ||
                                 (branch?.Type == Models.DecoratorType.LocalBranchHead &&
                                  DataContext is ViewModels.Histories { CurrentBranch: { IsDetachedHead: false } current } &&
                                  string.Equals(branch.Name, current.Name, StringComparison.Ordinal));

@@ -73,7 +73,7 @@ namespace SourceGit.Models
         {
             get
             {
-                var branches = Decorators.FindAll(x => x.IsBranch);
+                var branches = Decorators.FindAll(x => x.IsBranchOrHead);
                 return branches.Count > 0 ? string.Join("\n", branches.ConvertAll(x => x.Name)) : null;
             }
         }
