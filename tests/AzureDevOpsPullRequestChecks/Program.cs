@@ -59,6 +59,8 @@ internal static class Program
             CheckDialog(fixture, args.Contains("--render"));
             CheckTokenDialog(fixture, args.Contains("--render"));
             CheckCommitDefaults(fixture);
+            CheckReviewerLabels();
+            CheckPushAndCreate(fixture);
             CheckReviewerSuggestionsAndTargets(fixture, args.Contains("--render"));
             CheckBranchOrigins(fixture);
             CheckExistingPullRequests(fixture, args.Contains("--render"));
@@ -146,18 +148,18 @@ internal static class Program
         local.IsHeadAuthoredByUser = published.IsHeadAuthoredByUser = true;
 
         local.Head = new('b', 40);
-        Check(Item(local) is { IsEnabled: false }, "local commits not yet published keep Create PR disabled");
-        Check(Item(published) is { IsEnabled: false }, "remote context also checks an untracked local counterpart");
+        Check(Item(local) is { IsEnabled: true }, "local commits not yet published can open the PR dialog");
+        Check(Item(published) is { IsEnabled: true }, "remote context can create a PR from its published revision");
         local.Head = published.Head;
         published.Name = "different-name";
-        Check(Item(local) is { IsEnabled: false }, "matching commit alone does not infer the destination");
+        Check(Item(local) is { IsEnabled: true }, "unpublished local branch can use the single Azure remote");
         published.Name = local.Name;
 
         var secondRemote = new SourceGit.Models.Remote { Name = "mirror", URL = "https://dev.azure.com/another-org/sample-project/_git/sample-repo" };
         var secondBranch = new SourceGit.Models.Branch { Name = local.Name, FullName = "refs/remotes/mirror/feature/widgets", Remote = "mirror", Head = local.Head, IsHeadAuthoredByUser = true };
         repo.Remotes.Add(secondRemote);
         repo.Branches.Add(secondBranch);
-        Check(Item(local) is { IsEnabled: false } ambiguous && Equals(ambiguous.Header, App.Text("CreatePR.SelectPublishedBranch")), "multiple matching remotes require explicit choice");
+        Check(Item(local) is { IsEnabled: true } ambiguous && ambiguous.Items.Count == 2 && ambiguous.Items.OfType<MenuItem>().All(x => x.IsEnabled), "multiple matching remotes offer explicit destinations");
         Check(Item(published) is { IsEnabled: true }, "explicit remote branch resolves ambiguity");
         local.Upstream = published.FullName;
         Check(Item(local) is { IsEnabled: true }, "configured upstream takes precedence over other matches");
@@ -472,7 +474,7 @@ internal static class Program
         server.Commits = [new() { CommitId = new('b', 40), Comment = "Second subject" }, new() { CommitId = new('a', 40), Comment = "First subject\n\nDetails." }];
         model.Target = target;
         PumpUntil(() => !model.IsLoadingCommits);
-        Check(model.Title == "First subject" && model.Description == "- First subject\n  \n  Details.\n\n- Second subject", "multiple commits include every complete message in oldest-first order");
+        Check(model.Title == "First subject" && model.Description == "- First subject\n  \n  Details.\n- Second subject", "multiple commits keep their bodies without an extra blank line between messages");
         var gate = new TaskCompletionSource();
         server.CommitGate = gate.Task;
         model.Target = null;
@@ -517,6 +519,220 @@ internal static class Program
         var saved = repo.Settings.AzureDevOpsPullRequests.Values.Single(x => x.MergeStrategy == "rebase");
         Check(!saved.AutoComplete && !saved.DeleteSourceBranch, "explicit manual choices are remembered despite new first-use defaults");
         Preferences.Instance.AzureDevOpsConnection = previous;
+    }
+
+    private static void CheckReviewerLabels()
+    {
+        var identity = FakeServer.Reviewer();
+        identity.DisplayName = " reviewer@example.invalid ";
+        Check(identity.Label == "Example reviewer" && identity.Detail == "reviewer@example.invalid", "prefer the person's name when Azure's display name is their email");
+        identity.ProviderDisplayName = "REVIEWER@EXAMPLE.INVALID";
+        Check(identity.Detail.Length == 0, "email-only identities display their address once, ignoring case and whitespace");
+        identity.DisplayName = " ";
+        identity.ProviderDisplayName = "Example reviewer";
+        Check(identity.Label == "Example reviewer", "blank display names fall back to the provider name");
+        var selected = new PullRequestReviewer { Name = "reviewer@example.invalid", Detail = " REVIEWER@EXAMPLE.INVALID " };
+        Check(!selected.HasDetail, "selected reviewer rows also suppress duplicate contact text");
+    }
+
+    private static void CheckPushAndCreate(string fixture)
+    {
+        var directory = Path.Combine(fixture, "push-create");
+        var remotePath = Path.Combine(fixture, "push-create-remote").Replace('\\', '/');
+        Directory.CreateDirectory(directory);
+        string Git(params string[] arguments)
+        {
+            var info = new ProcessStartInfo("git") { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            foreach (var argument in arguments) info.ArgumentList.Add(argument);
+            using var process = Process.Start(info);
+            var output = process.StandardOutput.ReadToEnd();
+            var error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            if (process.ExitCode != 0) throw new Exception("Push fixture command failed: " + error);
+            return output.Trim();
+        }
+        T Wait<T>(Task<T> task) { PumpUntil(() => task.IsCompleted); return task.GetAwaiter().GetResult(); }
+        void Complete(Task task) { PumpUntil(() => task.IsCompleted); task.GetAwaiter().GetResult(); }
+        Git("init", "-b", "main");
+        Git("config", "user.name", "Example Developer");
+        Git("config", "user.email", "developer@example.invalid");
+        Git("config", "commit.gpgsign", "false");
+        Git("config", "core.hooksPath", "unused-hooks");
+        Git("commit", "--allow-empty", "-m", "Base");
+        var baseTip = Git("rev-parse", "HEAD");
+        Git("init", "--bare", remotePath);
+        Git("remote", "add", "origin", remotePath);
+        Git("push", "origin", "main");
+        Git("checkout", "-b", "feature/widgets");
+        Git("commit", "--allow-empty", "-m", "First local change", "-m", "Detailed explanation.");
+        Git("commit", "--allow-empty", "-m", "Second local change");
+        Git("config", "push.followTags", "true");
+        Git("-c", "tag.gpgsign=false", "tag", "-a", "local-only", "-m", "Local tag");
+        var tip = Git("rev-parse", "HEAD");
+        var configuration = File.ReadAllText(Path.Combine(directory, ".git", "config"));
+        var git = new SourceGit.Commands.PullRequestGit(directory, new() { Name = "origin", URL = remotePath });
+        var repo = new Repository(false, directory, Path.Combine(directory, ".git"));
+        var local = new SourceGit.Models.Branch { Name = "feature/widgets", FullName = Source, Head = tip, IsLocal = true, IsHeadAuthoredByUser = true };
+        var previous = Preferences.Instance.AzureDevOpsConnection;
+        Preferences.Instance.AzureDevOpsConnection = new ConnectionSettings { ClientId = "55555555-5555-5555-5555-555555555555" };
+        var pushes = 0;
+        var rejectPush = false;
+        var losePushResponse = false;
+        TaskCompletionSource gate = null;
+        CreatePullRequest Open(FakeServer server, string account)
+        {
+            var model = new CreatePullRequest(repo, new() { Name = "origin", URL = Address.WebUrl },
+                new() { Name = local.Name, FullName = "refs/remotes/origin/" + local.Name, Remote = "origin" }, local,
+                http: new HttpClient(server), authenticationFactory: (_, _) => Task.FromResult<IAuthentication>(new FakeAuthentication(account)),
+                localCommitReader: git.ReadMessagesAsync,
+                pushSource: async (reviewedTip, token) =>
+                {
+                    pushes++;
+                    Check(server.Posts == 0, "no PR POST before push finishes");
+                    if (gate != null) await gate.Task.WaitAsync(token);
+                    if (rejectPush) return false;
+                    var result = await git.PushAsync(reviewedTip, Source, false, null, token);
+                    if (result)
+                    {
+                        server.SourceMissing = false;
+                        server.SourceTip = Git("-C", remotePath, "rev-parse", Source);
+                    }
+                    return result && !losePushResponse;
+                });
+            Complete(model.InitializeAsync());
+            model.Target ??= model.Branches.Single(x => x.Name == Target);
+            PumpUntil(() => !model.IsLoadingCommits);
+            return model;
+        }
+        try
+        {
+            var server = new FakeServer { SourceMissing = true, TargetTip = baseTip };
+            using (var model = Open(server, "push-success"))
+            {
+                Check(model.NeedsPush && model.CanCreate && model.PrimaryLabel == "Push and create PR", "unpublished source is ready for combined push and creation");
+                Check(model.Title == "First local change" && model.Description == "- First local change\n  \n  Detailed explanation.\n- Second local change", "unpushed commit preview comes from the local branch without extra separators");
+                Check(server.CommitPages == 0 && pushes == 0, "opening an unpublished source does not push or ask Azure for unknown commit objects");
+                model.IsDraft = true;
+                Check(model.PrimaryLabel == "Push and create draft PR", "combined action describes draft creation");
+                model.IsDraft = false;
+                gate = new();
+                var submit = model.SubmitAsync();
+                PumpUntil(() => pushes == 1);
+                Check(model.IsBusy && !model.CanCreate && server.Posts == 0, "creation remains blocked while push is pending");
+                gate.SetResult();
+                Complete(submit);
+                gate = null;
+                Check(model.IsSuccessful && !model.NeedsPush && server.Posts == 1 && server.SourceTip == tip, "create follows verified publication of the reviewed commit");
+                Check(configuration == File.ReadAllText(Path.Combine(directory, ".git", "config")), "combined push leaves branch tracking and Git configuration unchanged");
+                Check(Git("-C", remotePath, "for-each-ref", "--format=%(refname)", "refs/tags").Length == 0, "combined push excludes tags even when push.followTags is enabled");
+            }
+
+            server = new() { SourceMissing = true, TargetTip = baseTip };
+            rejectPush = true;
+            using (var model = Open(server, "push-failed"))
+            {
+                Complete(model.SubmitAsync());
+                Check(server.Posts == 0 && model.NeedsPush && model.Error == App.Text("CreatePR.Error.PushFailed"), "failed push cannot create a PR");
+                rejectPush = false;
+                Complete(model.SubmitAsync());
+                Check(model.IsSuccessful && server.Posts == 1, "retry can push and create after a definitive push failure");
+            }
+
+            server = new() { SourceMissing = true, TargetTip = baseTip };
+            losePushResponse = true;
+            using (var model = Open(server, "push-response-lost"))
+            {
+                Complete(model.SubmitAsync());
+                var before = pushes;
+                Check(server.Posts == 0 && !server.SourceMissing, "uncertain push result stops before PR creation");
+                losePushResponse = false;
+                Complete(model.SubmitAsync());
+                Check(model.IsSuccessful && pushes == before, "retry detects an already completed push instead of pushing twice");
+            }
+
+            server = new() { SourceTip = tip, TargetTip = baseTip };
+            using (var model = Open(server, "already-published"))
+            {
+                var before = pushes;
+                Check(!model.NeedsPush && model.PrimaryLabel == "Create PR", "published source retains Create PR");
+                Complete(model.SubmitAsync());
+                Check(model.IsSuccessful && pushes == before, "published-source creation performs no push");
+            }
+
+            server = new() { SourceMissing = true, TargetTip = baseTip };
+            using (var model = Open(server, "late-existing"))
+            {
+                var before = pushes;
+                server.Current = new() { PullRequestId = 23, SourceRefName = Source, TargetRefName = Target, Status = "active" };
+                Complete(model.SubmitAsync());
+                Check(model.HasExistingPullRequest && pushes == before && server.Posts == 0, "late duplicate discovery stops before pushing into an existing PR");
+            }
+
+            server = new() { SourceMissing = true, TargetTip = baseTip };
+            using (var model = Open(server, "changed-preview"))
+            {
+                var before = pushes;
+                Git("commit", "--allow-empty", "-m", "Third local change");
+                Complete(model.SubmitAsync());
+                Check(model.CanRetryLoading && pushes == before && server.Posts == 0 && model.Error == App.Text("CreatePR.Error.SourcePreviewChanged"), "new commits require a fresh preview before pushing");
+                Complete(model.RetryLoadingAsync());
+                Check(model.Description.EndsWith("- Third local change"), "reload includes newly committed work");
+                Complete(model.SubmitAsync());
+                tip = Git("rev-parse", "HEAD");
+                Check(model.IsSuccessful && server.SourceTip == tip, "reviewed new source can be published and submitted");
+            }
+
+            server = new() { SourceMissing = true, TargetTip = baseTip };
+            using (var model = Open(server, "cancelled-push"))
+            {
+                var before = pushes;
+                gate = new();
+                var submit = model.SubmitAsync();
+                PumpUntil(() => pushes == before + 1);
+                model.Dispose();
+                Complete(submit);
+                gate = null;
+                Check(server.Posts == 0 && server.SourceMissing, "closing during push cannot continue into PR creation");
+            }
+
+            server = new() { SourceTip = tip, TargetTip = baseTip };
+            using (var model = Open(server, "publication-changed"))
+            {
+                var before = pushes;
+                server.SourceMissing = true;
+                Complete(model.SubmitAsync());
+                Check(model.CanRetryLoading && model.NeedsPush && pushes == before && server.Posts == 0, "Create PR never silently becomes a push after the source changes remotely");
+            }
+
+            server = new() { SourceMissing = true, TargetTip = baseTip, RejectCreate = true };
+            using (var model = Open(server, "creation-rejected-after-push"))
+            {
+                Complete(model.SubmitAsync());
+                var before = pushes;
+                Check(!model.NeedsPush && !model.HasPending && !model.IsFinished && model.PrimaryLabel == "Create PR", "PR rejection after a successful push leaves the source published");
+                server.RejectCreate = false;
+                Complete(model.SubmitAsync());
+                Check(model.IsSuccessful && pushes == before && server.Posts == 2, "retrying a definitively rejected PR does not repeat the successful push");
+            }
+
+            Check(!Wait(git.PushAsync(baseTip, Source, false, null, CancellationToken.None)) && Git("-C", remotePath, "rev-parse", Source) == tip, "non-fast-forward push is rejected without overwriting the remote branch");
+            Git("config", "--add", "remote.origin.pushurl", remotePath);
+            Git("config", "--add", "remote.origin.pushurl", remotePath);
+            try { Wait(git.PushAsync(tip, Source, false, null, CancellationToken.None)); throw new Exception("Expected ambiguous push destinations"); }
+            catch (ServiceException ex) { Check(ex.Code == "AmbiguousRemote", "multiple push URLs are rejected before any push"); }
+            Git("config", "--unset-all", "remote.origin.pushurl");
+            Git("config", "remote.origin.pushurl", remotePath + "-changed");
+            try { Wait(git.PushAsync(tip, Source, false, null, CancellationToken.None)); throw new Exception("Expected changed push destination"); }
+            catch (ServiceException ex) { Check(ex.Code == "AmbiguousRemote", "a changed push URL cannot redirect a reviewed push"); }
+            Git("config", "--unset-all", "remote.origin.pushurl");
+
+            var tree = Git("-C", remotePath, "rev-parse", "main^{tree}");
+            var remoteTarget = Git("-C", remotePath, "-c", "user.name=Example Developer", "-c", "user.email=developer@example.invalid", "commit-tree", tree, "-p", baseTip, "-m", "Target moved remotely");
+            Git("-C", remotePath, "update-ref", "refs/heads/late-target", remoteTarget);
+            var messages = Wait(git.ReadMessagesAsync(tip, "refs/heads/late-target", remoteTarget, CancellationToken.None));
+            Check(messages.Count == 3 && messages[0].StartsWith("First local change"), "missing target objects are fetched before comparing unpublished commits");
+        }
+        finally { Preferences.Instance.AzureDevOpsConnection = previous; }
     }
 
     private static void CheckReviewerSuggestionsAndTargets(string fixture, bool render)
@@ -564,6 +780,15 @@ internal static class Program
         var add = window.GetVisualDescendants().OfType<Button>().Single(x => x.DataContext is Identity identity && identity.Id == ReviewerId);
         add.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
         Check(model.Reviewers.Count == 1 && model.SearchText.Length == 0, "row Add button adds a reviewer directly without a selection step");
+        var section = window.FindControl<Border>("ReviewersSection");
+        Check(searchBox.GetVisualAncestors().Contains(section) && window.FindControl<ItemsControl>("SelectedReviewers").GetVisualAncestors().Contains(section), "reviewer search and selected people share one visible group");
+        var emailOnly = new Identity { Id = "77777777-7777-7777-7777-777777777777", DisplayName = "email-only@example.invalid", UniqueName = "email-only@example.invalid", IsActive = true };
+        model.AddReviewer(emailOnly);
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+        Check(model.ReviewerSummary == "2 selected", "reviewer count updates after direct additions");
+        Check(section.GetVisualDescendants().OfType<TextBlock>().Count(x => x.IsVisible && x.Text == emailOnly.UniqueName) == 1, "native selected-reviewer row renders an email-only identity once");
+        model.RemoveReviewer(model.Reviewers.Single(x => x.Id == emailOnly.Id));
         model.AddReviewer(FakeServer.Reviewer());
         Check(model.Reviewers.Count == 1, "duplicate reviewer addition is ignored");
         model.Reviewers[0].IsRequired = true;
@@ -973,6 +1198,7 @@ internal static class Program
     private sealed class FakeServer : HttpMessageHandler
     {
         public string SourceTip = new('a', 40);
+        public string TargetTip = new('c', 40);
         public bool SourceMissing, IgnoreRequiredAtCreation, FailPatchOnce, LoseCreateResponse, MoveSourceAfterCreate, RejectCreate;
         public HttpStatusCode? RepositoryError;
         public string ExpectedTenant;
@@ -1032,7 +1258,7 @@ internal static class Program
             }
             if (path.EndsWith("/commits"))
             {
-                Check(query["searchCriteria.compareVersion.version"] == SourceTip && new[] { new string('c', 40) }.Concat(OtherBranches.Select(x => x.ObjectId)).Contains(query["searchCriteria.itemVersion.version"]), "commit comparison walks from the source tip with the target as the baseline");
+                Check(query["searchCriteria.compareVersion.version"] == SourceTip && new[] { TargetTip }.Concat(OtherBranches.Select(x => x.ObjectId)).Contains(query["searchCriteria.itemVersion.version"]), "commit comparison walks from the source tip with the target as the baseline");
                 Check(query["searchCriteria.itemVersion.versionType"] == "commit" && query["searchCriteria.compareVersion.versionType"] == "commit" && query["searchCriteria.showOldestCommitsFirst"] == null, "comparison does not request oldest-first mode that ignores branch filters");
                 CommitPages++;
                 var result = Commits.Skip(int.Parse(query["$skip"])).Take(int.Parse(query["$top"])).ToList();
@@ -1049,7 +1275,7 @@ internal static class Program
             }
             if (path.EndsWith("/refs"))
             {
-                var refs = new List<GitRef> { new() { Name = Target, ObjectId = new('c', 40) } };
+                var refs = new List<GitRef> { new() { Name = Target, ObjectId = TargetTip } };
                 refs.AddRange(OtherBranches);
                 if (!SourceMissing) refs.Add(new() { Name = Source, ObjectId = SourceTip });
                 return Json(new ListResult<GitRef> { Value = refs.Where(x => x.Name[5..].StartsWith(query["filter"], StringComparison.Ordinal)).ToList() }, ApiJsonContext.Default.ListResultGitRef);

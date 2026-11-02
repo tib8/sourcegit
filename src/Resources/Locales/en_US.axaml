@@ -26,6 +26,16 @@
   <x:String x:Key="Text.CreatePR.Subject">Title</x:String>
   <x:String x:Key="Text.CreatePR.Description">Description</x:String>
   <x:String x:Key="Text.CreatePR.Reviewers">Reviewers</x:String>
+  <x:String x:Key="Text.CreatePR.SelectedReviewers">{0} selected</x:String>
+  <x:String x:Key="Text.CreatePR.NoSelectedReviewers">No reviewers selected</x:String>
+  <x:String x:Key="Text.CreatePR.PushCreate">Push and create PR</x:String>
+  <x:String x:Key="Text.CreatePR.PushCreateDraft">Push and create draft PR</x:String>
+  <x:String x:Key="Text.CreatePR.PushDestination">Unpushed commits will be pushed to {0}.</x:String>
+  <x:String x:Key="Text.CreatePR.Pushing">Pushing to {0}…</x:String>
+  <x:String x:Key="Text.CreatePR.VerifyingPush">Verifying the published branch…</x:String>
+  <x:String x:Key="Text.CreatePR.Error.PushFailed">The push did not complete. Resolve any Git push errors and try again. No pull request was created.</x:String>
+  <x:String x:Key="Text.CreatePR.Error.LocalCommitsUnavailable">Could not load the local commits against the target branch. Fetch the target and retry loading.</x:String>
+  <x:String x:Key="Text.CreatePR.Error.SourcePreviewChanged">The source branch changed after this preview. Retry loading and review the current commits before continuing.</x:String>
   <x:String x:Key="Text.CreatePR.SearchReviewers">Type at least 2 characters of a name or email</x:String>
   <x:String x:Key="Text.CreatePR.SearchingReviewers">Searching users and groups…</x:String>
   <x:String x:Key="Text.CreatePR.NoReviewersFound">No matching users or groups to add.</x:String>
