@@ -1252,7 +1252,7 @@ namespace SourceGit.Views
 
                 menu.Items.Add(push);
 
-                if (!repo.IsBare)
+                if (!repo.IsBare && current != null)
                 {
                     var merge = new MenuItem();
                     merge.Header = App.Text("BranchCM.Merge", branch.Name, current.Name);
@@ -1329,14 +1329,17 @@ namespace SourceGit.Views
 
                 menu.Items.Add(new MenuItem() { Header = "-" });
 
-                var compareWithCurrent = new MenuItem();
-                compareWithCurrent.Header = App.Text("BranchCM.CompareWithHead");
-                compareWithCurrent.Icon = this.CreateMenuIcon("Icons.Compare");
-                compareWithCurrent.Click += (_, _) =>
+                if (current != null)
                 {
-                    this.ShowWindow(new ViewModels.Compare(repo, branch, current));
-                };
-                menu.Items.Add(compareWithCurrent);
+                    var compareWithCurrent = new MenuItem();
+                    compareWithCurrent.Header = App.Text("BranchCM.CompareWithHead");
+                    compareWithCurrent.Icon = this.CreateMenuIcon("Icons.Compare");
+                    compareWithCurrent.Click += (_, _) =>
+                    {
+                        this.ShowWindow(new ViewModels.Compare(repo, branch, current));
+                    };
+                    menu.Items.Add(compareWithCurrent);
+                }
 
                 if (upstream != null)
                 {

@@ -91,7 +91,8 @@ namespace SourceGit.Commands
                 branch.IsDetachedHead = false;
             }
             else if (refName.StartsWith(PREFIX_DETACHED_AT, StringComparison.Ordinal) ||
-                     refName.StartsWith(PREFIX_DETACHED_FROM, StringComparison.Ordinal))
+                     refName.StartsWith(PREFIX_DETACHED_FROM, StringComparison.Ordinal) ||
+                     refName.Equals("(no branch)", StringComparison.Ordinal))
             {
                 branch.Name = "HEAD";
                 branch.IsLocal = true;
