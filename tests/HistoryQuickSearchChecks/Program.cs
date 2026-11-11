@@ -31,6 +31,11 @@ internal static class Program
             .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
         try
         {
+            if (args.Length == 2 && args[0] == "--profile-refresh")
+            {
+                ProfileRefresh(args[1], fixture);
+                return;
+            }
             if (args.Length >= 2 && args[0] == "--repository")
             {
                 CheckRepositoryGraph(args[1], args.Length > 2 ? args[2] : null);
@@ -458,6 +463,51 @@ internal static class Program
             "history refresh preserves the working-directory selection with quick search text present");
         Preferences.Instance.WorkingDirectoryHeadMode = 0;
         window.Close();
+    }
+
+    private static void ProfileRefresh(string path, string fixture)
+    {
+        Directory.CreateDirectory(Path.Combine(fixture, ".git"));
+        var gitDir = Git(path, "rev-parse", "--absolute-git-dir").Trim();
+        var stateFile = Path.Combine(gitDir, "sourcegit.uistates");
+        if (File.Exists(stateFile))
+            File.Copy(stateFile, Path.Combine(fixture, ".git", "sourcegit.uistates"));
+        Preferences.Instance.WorkingDirectoryHeadMode = 1;
+        var repo = new Repository(false, fixture, Path.Combine(fixture, ".git"));
+        using var histories = new Histories(repo) { IsLoading = false, IsCollapseDetails = true };
+        histories.CurrentBranch = new QueryBranches(path).GetResultAsync().GetAwaiter().GetResult().Find(b => b.IsCurrent);
+        typeof(Histories).GetField("_ignoreSelectionChange", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(histories, true);
+        var view = new HistoryView { DataContext = histories };
+        var window = new Window { Width = 1600, Height = 1000, Content = view };
+        window.Show();
+        try
+        {
+            for (var pass = 0; pass < 3; pass++)
+            {
+                var timer = Stopwatch.StartNew();
+                // Only read Git history from the supplied repository; UI state belongs to the fixture.
+                var commits = new QueryCommits(path, "--branches --remotes --tags HEAD --date-order -20000").GetResultAsync().GetAwaiter().GetResult();
+                Console.WriteLine($"pass {pass}: query {timer.ElapsedMilliseconds} ms, {commits.Count} commits");
+                timer.Restart();
+                histories.Commits = commits;
+                Console.WriteLine($"pass {pass}: bound list replacement {timer.ElapsedMilliseconds} ms");
+                var total = Stopwatch.StartNew();
+                long maximumDispatch = 0;
+                do
+                {
+                    timer.Restart();
+                    Dispatcher.UIThread.RunJobs();
+                    window.UpdateLayout();
+                    AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                    maximumDispatch = Math.Max(maximumDispatch, timer.ElapsedMilliseconds);
+                    Thread.Sleep(10);
+                } while ((histories.Graph == null || total.ElapsedMilliseconds < 500) && total.ElapsedMilliseconds < 60000);
+                Console.WriteLine($"pass {pass}: graph/paint {total.ElapsedMilliseconds} ms, longest dispatch/layout {maximumDispatch} ms");
+                histories.SelectedCommits = [histories.Commits[Math.Min(5000, histories.Commits.Count - 1)]];
+                Dispatcher.UIThread.RunJobs();
+            }
+        }
+        finally { window.Close(); }
     }
 
     private static void CheckRepositoryGraph(string path, string preview)

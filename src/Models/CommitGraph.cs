@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 
 using Avalonia;
 using Avalonia.Media;
@@ -75,8 +76,78 @@ namespace SourceGit.Models
         public List<Link> Links { get; } = [];
         public List<Dot> Dots { get; } = [];
 
-        public static CommitGraph GenerateFiltered(List<Commit> allCommits, List<Commit> visibleCommits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory = false, bool reserveHeadLane = true, int bookmark = 0)
+        // Capture on the UI thread. Generation mutates only detached commit copies and
+        // never reads the live palette, selection, or bound commit properties.
+        public sealed class Snapshot
         {
+            public Snapshot(List<Commit> all, List<Commit> visible, bool filtered, bool firstParentOnly,
+                CommitGraphHighlighting highlighting, HashSet<string> extraHeads, bool workingDirectory, bool reserveHeadLane, int bookmark)
+            {
+                _targets = visible;
+                _filtered = filtered;
+                _firstParentOnly = firstParentOnly;
+                _highlighting = highlighting;
+                _extraHeads = new(extraHeads);
+                _workingDirectory = workingDirectory;
+                _reserveHeadLane = reserveHeadLane;
+                _colorCount = s_penCount;
+                _headColor = GetBookmarkColor(bookmark);
+                _bookmark = bookmark;
+                var copies = new Dictionary<string, Commit>();
+                foreach (var commit in filtered ? all : visible)
+                {
+                    var copy = new Commit
+                    {
+                        SHA = commit.SHA,
+                        Parents = new(commit.Parents),
+                        Decorators = commit.Decorators.ConvertAll(d => new Decorator { Name = d.Name, Type = d.Type }),
+                        IsMerged = commit.IsMerged,
+                    };
+                    copies[copy.SHA] = copy;
+                    _all.Add(copy);
+                }
+                _visible = visible.ConvertAll(c => copies[c.SHA]);
+            }
+
+            public CommitGraph Generate(CancellationToken cancellationToken) => _filtered ?
+                GenerateFiltered(_all, _visible, _firstParentOnly, _highlighting, new(_extraHeads), _workingDirectory, _reserveHeadLane,
+                    paletteSize: _colorCount, bookmarkColor: _headColor, cancellationToken: cancellationToken) :
+                CommitGraph.Generate(_visible, _firstParentOnly, _highlighting, new(_extraHeads), _workingDirectory, _reserveHeadLane,
+                    paletteSize: _colorCount, bookmarkColor: _headColor, cancellationToken: cancellationToken);
+
+            public void Apply()
+            {
+                for (var i = 0; i < _targets.Count; i++)
+                {
+                    var target = _targets[i];
+                    var computed = _visible[i];
+                    target.Color = computed.Color;
+                    target.LeftMargin = computed.LeftMargin;
+                    target.IsHighlightedInGraph = computed.IsHighlightedInGraph;
+                    target.GraphBranches = computed.GraphBranches;
+                }
+            }
+
+            public bool IsPaletteCurrent => _colorCount == s_penCount && _headColor == GetBookmarkColor(_bookmark);
+
+            private readonly List<Commit> _targets;
+            private readonly List<Commit> _all = [];
+            private readonly List<Commit> _visible;
+            private readonly bool _filtered;
+            private readonly bool _firstParentOnly;
+            private readonly CommitGraphHighlighting _highlighting;
+            private readonly HashSet<string> _extraHeads;
+            private readonly bool _workingDirectory;
+            private readonly bool _reserveHeadLane;
+            private readonly int _colorCount;
+            private readonly int _headColor;
+            private readonly int _bookmark;
+        }
+
+        public static CommitGraph GenerateFiltered(List<Commit> allCommits, List<Commit> visibleCommits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory = false, bool reserveHeadLane = true, int bookmark = 0, int? paletteSize = null, int? bookmarkColor = null, CancellationToken cancellationToken = default)
+        {
+            var colorCount = paletteSize ?? s_penCount;
+            var headColor = bookmarkColor ?? GetBookmarkColor(bookmark);
             var visible = new HashSet<string>();
             foreach (var commit in visibleCommits)
                 visible.Add(commit.SHA);
@@ -91,6 +162,7 @@ namespace SourceGit.Models
             // oldest to newest, stopping each path at its first visible commit.
             for (var i = allCommits.Count - 1; i >= 0; i--)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var commit = allCommits[i];
                 var parentCount = firstParentOnlyEnabled ? Math.Min(1, commit.Parents.Count) : commit.Parents.Count;
                 List<string> resolved = [];
@@ -133,6 +205,7 @@ namespace SourceGit.Models
                     }
                     while (pending.TryPop(out var ancestor))
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         if (visibleOrder[ancestor] > oldest || !visited.Add(ancestor))
                             continue;
 
@@ -155,15 +228,15 @@ namespace SourceGit.Models
                 }
             }
 
-            return Generate(visibleCommits, firstParentOnlyEnabled, highlighting, highlightExtraCommits, hasWorkingDirectory, reserveHeadLane, parents, bookmark);
+            return Generate(visibleCommits, firstParentOnlyEnabled, highlighting, highlightExtraCommits, hasWorkingDirectory, reserveHeadLane, parents, colorCount, headColor, cancellationToken);
         }
 
-        public static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory = false, bool reserveHeadLane = true, int bookmark = 0)
+        public static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory = false, bool reserveHeadLane = true, int bookmark = 0, int? paletteSize = null, int? bookmarkColor = null, CancellationToken cancellationToken = default)
         {
-            return Generate(commits, firstParentOnlyEnabled, highlighting, highlightExtraCommits, hasWorkingDirectory, reserveHeadLane, null, bookmark);
+            return Generate(commits, firstParentOnlyEnabled, highlighting, highlightExtraCommits, hasWorkingDirectory, reserveHeadLane, null, paletteSize ?? s_penCount, bookmarkColor ?? GetBookmarkColor(bookmark), cancellationToken);
         }
 
-        private static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory, bool reserveHeadLane, Dictionary<string, List<string>> parentOverrides, int bookmark)
+        private static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, bool hasWorkingDirectory, bool reserveHeadLane, Dictionary<string, List<string>> parentOverrides, int colorCount, int bookmarkColor, CancellationToken cancellationToken)
         {
             const double unitWidth = 12;
             const double halfWidth = 6;
@@ -174,8 +247,8 @@ namespace SourceGit.Models
             var unsolved = new List<PathHelper>();
             var ended = new List<PathHelper>();
             var offsetY = -halfHeight;
-            var headColor = commits.Exists(x => x.IsCurrentHead) ? GetBookmarkColor(bookmark) : -1;
-            var colorPicker = new ColorPicker(headColor);
+            var headColor = commits.Exists(x => x.IsCurrentHead) ? bookmarkColor : -1;
+            var colorPicker = new ColorPicker(headColor, colorCount);
             var defHighlighting = highlighting == CommitGraphHighlighting.All;
 
             // Keep HEAD's first-parent ancestry in the first lane, even when other
@@ -192,6 +265,7 @@ namespace SourceGit.Models
 
             foreach (var commit in commits)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var parents = parentOverrides != null && parentOverrides.TryGetValue(commit.SHA, out var projected) ? projected : commit.Parents;
                 PathHelper major = null;
                 var isBookmarkedHead = commit.IsCurrentHead && headColor >= 0;
@@ -479,30 +553,30 @@ namespace SourceGit.Models
             return s_penCount + bookmark - 1;
         }
 
-        private class ColorPicker(int reservedColor)
+        private class ColorPicker(int reservedColor, int colorCount)
         {
             public int Next(int exclude = -1)
             {
-                var reservedCount = s_penCount > 1 && reservedColor >= 0 && reservedColor < s_penCount ? 1 : 0;
+                var reservedCount = colorCount > 1 && reservedColor >= 0 && reservedColor < colorCount ? 1 : 0;
                 int color;
                 do
                 {
                     if (_colorsQueue.Count == 0)
                     {
-                        for (var i = 0; i < s_penCount; i++)
+                        for (var i = 0; i < colorCount; i++)
                             _colorsQueue.Enqueue(i);
                     }
 
                     color = _colorsQueue.Dequeue();
                 }
-                while ((reservedCount > 0 && color == reservedColor) || (s_penCount - reservedCount > 1 && color == exclude));
+                while ((reservedCount > 0 && color == reservedColor) || (colorCount - reservedCount > 1 && color == exclude));
 
                 return color;
             }
 
             public void Recycle(int idx)
             {
-                if (idx < s_penCount && idx != reservedColor && !_colorsQueue.Contains(idx))
+                if (idx < colorCount && idx != reservedColor && !_colorsQueue.Contains(idx))
                     _colorsQueue.Enqueue(idx);
             }
 

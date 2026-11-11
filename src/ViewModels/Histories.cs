@@ -342,10 +342,14 @@ namespace SourceGit.ViewModels
                 {
                     if (!IsWorkingDirectoryVisible)
                         IsWorkingDirectorySelected = false;
-                    Entries.Clear();
+                    // DataGridCollectionView expands AddRange notifications into individual
+                    // insertions. Replacing 20,000 rows that way monopolizes the UI thread.
+                    // Populate off-binding, then expose the complete collection once.
+                    var entries = new List<object>(DisplayedCommits.Count + 1);
                     if (IsWorkingDirectoryVisible)
-                        Entries.Add(WorkingDirectory);
-                    Entries.AddRange(DisplayedCommits);
+                        entries.Add(WorkingDirectory);
+                    entries.AddRange(DisplayedCommits);
+                    Entries = new AvaloniaList<object>(entries);
                 }
                 finally
                 {
@@ -363,7 +367,11 @@ namespace SourceGit.ViewModels
 
         public bool IsUpdatingEntries { get; private set; }
 
-        public AvaloniaList<object> Entries { get; } = [];
+        public AvaloniaList<object> Entries
+        {
+            get => _entries;
+            private set => SetProperty(ref _entries, value);
+        }
         public WorkingDirectoryEntry WorkingDirectory { get; } = new();
         public WorkingCopy WorkingCopy => _repo.WorkingCopy;
 
@@ -593,6 +601,7 @@ namespace SourceGit.ViewModels
 
         public void Dispose()
         {
+            _graphCancellation?.Cancel();
             SuspendNavigationVisits();
             CancelQuickSearch();
             Preferences.Instance.PropertyChanged -= OnPreferencesChanged;
@@ -968,6 +977,7 @@ namespace SourceGit.ViewModels
 
         private void GenerateGraph(List<Models.Commit> commits)
         {
+            _graphCancellation?.Cancel();
             var firstParentOnly = _repo.UIStates.HistoryShowFlags.HasFlag(Models.HistoryShowFlags.FirstParentOnly);
             var highlighting = _repo.UIStates.GraphHighlighting;
             var extraHeads = new HashSet<string>();
@@ -978,9 +988,64 @@ namespace SourceGit.ViewModels
                     extraHeads.Add(c.SHA);
             }
 
+            // Small histories remain immediate (including empty/working-directory rows).
+            // Large histories must not monopolize the dispatcher during a refresh.
+            if ((IsQuickSearchFilterActive ? _commits.Count : commits.Count) > 256)
+            {
+                var snapshot = new Models.CommitGraph.Snapshot(_commits, commits, IsQuickSearchFilterActive,
+                    firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible,
+                    Preferences.Instance.WorkingDirectoryHeadMode != 0, _repo.Bookmark);
+                var cancellation = new CancellationTokenSource();
+                _graphCancellation = cancellation;
+                // The old graph may describe a different set/order of rows.
+                Graph = null;
+                _ = GenerateGraphAsync(snapshot, cancellation);
+                return;
+            }
+
             var graph = IsQuickSearchFilterActive ?
                 Models.CommitGraph.GenerateFiltered(_commits, commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, Preferences.Instance.WorkingDirectoryHeadMode != 0, _repo.Bookmark) :
                 Models.CommitGraph.Generate(commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, Preferences.Instance.WorkingDirectoryHeadMode != 0, _repo.Bookmark);
+            ApplyGraph(graph);
+        }
+
+        private async Task GenerateGraphAsync(Models.CommitGraph.Snapshot snapshot, CancellationTokenSource cancellation)
+        {
+            try
+            {
+                var graph = await Task.Run(() => snapshot.Generate(cancellation.Token), cancellation.Token).ConfigureAwait(false);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (cancellation.IsCancellationRequested)
+                        return;
+                    if (!snapshot.IsPaletteCurrent)
+                    {
+                        GenerateGraph(DisplayedCommits);
+                        return;
+                    }
+                    snapshot.Apply();
+                    ApplyGraph(graph);
+                }, DispatcherPriority.Background);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            catch (Exception ex)
+            {
+                if (!cancellation.IsCancellationRequested)
+                    Models.Notification.Send(_repo.FullPath, $"Failed to generate commit graph: {ex.Message}", true);
+            }
+            finally
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (_graphCancellation == cancellation)
+                        _graphCancellation = null;
+                    cancellation.Dispose();
+                });
+            }
+        }
+
+        private void ApplyGraph(Models.CommitGraph graph)
+        {
             if (IsWorkingDirectoryVisible)
             {
                 WorkingDirectory.LeftMargin = graph.Dots[0].Center.X + 14;
@@ -990,6 +1055,8 @@ namespace SourceGit.ViewModels
         }
 
         private bool _selectHeadAfterRefresh;
+        private AvaloniaList<object> _entries = [];
+        private CancellationTokenSource _graphCancellation;
         private int _selectionVersion;
         private bool _isWorkingDirectorySelected;
         private bool _updatingSelection;

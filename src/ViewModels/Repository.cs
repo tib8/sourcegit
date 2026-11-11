@@ -482,7 +482,8 @@ namespace SourceGit.ViewModels
             });
             try
             {
-                _watcher = new Models.Watcher(this, FullPath, _gitCommonDir);
+                _watcher = new Models.Watcher(this, FullPath, _gitCommonDir,
+                    (paths, token) => Models.IgnoredPaths.QueryAsync(FullPath, Native.OS.GitExecutable, paths, token), GitDir);
             }
             catch (Exception ex)
             {
@@ -1192,7 +1193,7 @@ namespace SourceGit.ViewModels
             var remotes = await new Commands.QueryRemotes(FullPath).GetResultAsync().ConfigureAwait(false);
             var builder = BuildBranchTree(branches, remotes);
 
-            Dispatcher.UIThread.Invoke(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!context.IsCurrent)
                     return;
@@ -1218,7 +1219,7 @@ namespace SourceGit.ViewModels
 
                 var hasPendingPullOrPush = CurrentBranch?.IsTrackStatusVisible ?? false;
                 GetOwnerPage()?.ChangeDirtyState(Models.DirtyState.HasPendingPullOrPush, !hasPendingPullOrPush);
-            });
+            }, DispatcherPriority.Background);
         }
 
         public void RefreshWorktrees()
@@ -1230,11 +1231,11 @@ namespace SourceGit.ViewModels
         {
             var worktrees = await new Commands.Worktree(FullPath).WithCancellation(context.CancellationToken).ReadAllAsync().ConfigureAwait(false);
             var cleaned = Worktree.Build(FullPath, worktrees);
-            Dispatcher.UIThread.Invoke(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (context.IsCurrent)
                     Worktrees = cleaned;
-            });
+            }, DispatcherPriority.Background);
         }
 
         public void RefreshTags()
@@ -1245,7 +1246,7 @@ namespace SourceGit.ViewModels
         private async Task RefreshTagsAsync(Models.RefreshCoordinator.Context context)
         {
             var tags = await new Commands.QueryTags(FullPath).WithCancellation(context.CancellationToken).GetResultAsync().ConfigureAwait(false);
-            Dispatcher.UIThread.Invoke(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!context.IsCurrent)
                     return;
@@ -1253,7 +1254,7 @@ namespace SourceGit.ViewModels
                 Tags = tags;
                 VisibleTags = BuildVisibleTags();
                 ValidateHistoryFilters(false);
-            });
+            }, DispatcherPriority.Background);
         }
 
         public void RefreshCommits()
@@ -1267,7 +1268,7 @@ namespace SourceGit.ViewModels
             {
                 if (context.IsCurrent)
                     _histories.IsLoading = true;
-            });
+            }, DispatcherPriority.Background);
 
             try
             {
@@ -1308,7 +1309,7 @@ namespace SourceGit.ViewModels
                     }
                 }
 
-                Dispatcher.UIThread.Invoke(() =>
+                await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (!context.IsCurrent)
                         return;
@@ -1323,7 +1324,7 @@ namespace SourceGit.ViewModels
                     }
 
                     _navigateToCommitDelayed = string.Empty;
-                });
+                }, DispatcherPriority.Background);
             }
             finally
             {
@@ -1331,7 +1332,7 @@ namespace SourceGit.ViewModels
                 {
                     if (context.IsCurrent)
                         _histories.IsLoading = false;
-                });
+                }, DispatcherPriority.Background);
             }
         }
 
@@ -1346,14 +1347,14 @@ namespace SourceGit.ViewModels
             {
                 if (_submodules.Count > 0)
                 {
-                    Dispatcher.UIThread.Invoke(() =>
+                    await Dispatcher.UIThread.InvokeAsync(() =>
                     {
                         if (!context.IsCurrent)
                             return;
 
                         Submodules = [];
                         VisibleSubmodules = BuildVisibleSubmodules();
-                    });
+                    }, DispatcherPriority.Background);
                 }
 
                 return;
@@ -1361,7 +1362,7 @@ namespace SourceGit.ViewModels
 
             var submodules = await new Commands.QuerySubmodules(FullPath).WithCancellation(context.CancellationToken).GetResultAsync().ConfigureAwait(false);
 
-            Dispatcher.UIThread.Invoke(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!context.IsCurrent)
                     return;
@@ -1396,7 +1397,7 @@ namespace SourceGit.ViewModels
                     Submodules = submodules;
                     VisibleSubmodules = BuildVisibleSubmodules();
                 }
-            });
+            }, DispatcherPriority.Background);
         }
 
         public void RefreshWorkingCopyChanges()
@@ -1418,7 +1419,7 @@ namespace SourceGit.ViewModels
 
             changes.Sort((l, r) => Models.NumericSort.Compare(l.Path, r.Path));
 
-            Dispatcher.UIThread.Invoke(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!context.IsCurrent)
                     return;
@@ -1428,7 +1429,7 @@ namespace SourceGit.ViewModels
                 _histories.UpdateWorkingDirectory(changes);
                 OnPropertyChanged(nameof(InProgressContext));
                 GetOwnerPage()?.ChangeDirtyState(Models.DirtyState.HasLocalChanges, changes.Count == 0);
-            });
+            }, DispatcherPriority.Background);
         }
 
         public void RefreshStashes()
@@ -1442,7 +1443,7 @@ namespace SourceGit.ViewModels
                 return;
 
             var stashes = await new Commands.QueryStashes(FullPath).WithCancellation(context.CancellationToken).GetResultAsync().ConfigureAwait(false);
-            Dispatcher.UIThread.Invoke(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!context.IsCurrent)
                     return;
@@ -1451,7 +1452,7 @@ namespace SourceGit.ViewModels
                     _stashesPage.Stashes = stashes;
 
                 StashesCount = stashes.Count;
-            });
+            }, DispatcherPriority.Background);
         }
 
         public void CreateNewBranch()
@@ -1965,7 +1966,7 @@ namespace SourceGit.ViewModels
 
         private async Task AutoFetchOnUIThread()
         {
-            if (IsAutoFetching)
+            if (IsAutoFetching || Models.RepositoryOperationGate.IsLocked(Models.RepositoryOperationGate.Key(_gitCommonDir)))
                 return;
 
             CommandLog log = null;
@@ -1997,6 +1998,7 @@ namespace SourceGit.ViewModels
                 if (remotes.Count == 0)
                     return;
 
+                using var lockWatcher = LockWatcher();
                 IsAutoFetching = true;
                 log = CreateLog("Auto-Fetch");
 

@@ -14,6 +14,48 @@ using Views = SourceGit.Views;
 
 internal static class Program
 {
+    private static void CheckLargeGraphRefresh(string fixture)
+    {
+        using var histories = new Histories(new Repository(true, fixture, Path.Combine(fixture, ".git")));
+        var commits = new List<Commit>();
+        for (var i = 0; i < 12000; i++)
+            commits.Add(new Commit { SHA = $"large-{i}", Parents = i + 256 >= 12000 ? [] : [$"large-{i + 256}"] });
+        var elapsed = Stopwatch.StartNew();
+        var incrementalRows = 0;
+        histories.Entries.CollectionChanged += (_, e) => incrementalRows += e.NewItems?.Count ?? 0;
+        histories.Commits = commits;
+        Check(incrementalRows == 0 && histories.Entries.Count == commits.Count,
+            "large replacement reaches the bound grid without thousands of incremental row insertions");
+        var snapshotTime = elapsed.ElapsedMilliseconds;
+        Check(histories.Graph == null, "large history graph is scheduled off the UI thread");
+        var heartbeat = false;
+        Dispatcher.UIThread.Post(() => heartbeat = true);
+        PumpUntil(() => heartbeat);
+        PumpUntil(() => histories.Graph != null);
+        Check(histories.Graph.Dots.Count == commits.Count, "background graph publishes every history row");
+        histories.RefreshGraph();
+        histories.Commits = [new Commit { SHA = "replacement" }];
+        var replacement = histories.Graph;
+        PumpFor(200);
+        Check(ReferenceEquals(histories.Graph, replacement) && histories.Graph.Dots.Count == 1, "stale graph cannot replace a newer history");
+        histories.Commits = commits;
+        histories.Dispose();
+        var closedGraph = histories.Graph;
+        PumpFor(200);
+        Check(ReferenceEquals(histories.Graph, closedGraph), "closed tab cannot publish a background graph");
+        Console.WriteLine($"Large graph: 12000 commits; UI snapshot/publication request {snapshotTime} ms; dispatcher heartbeat passed.");
+    }
+
+    private static void PumpFor(int milliseconds)
+    {
+        var timer = Stopwatch.StartNew();
+        while (timer.ElapsedMilliseconds < milliseconds)
+        {
+            Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(5);
+        }
+    }
+
     private static int _checks;
 
     [STAThread]
@@ -40,6 +82,7 @@ internal static class Program
             CheckClassification();
             CheckGraph();
             CheckScrolledGraphRendering();
+            CheckLargeGraphRefresh(fixture);
             if (args.Contains("--graph-only"))
             {
                 Console.WriteLine($"PASS: {_checks} graph checks");
@@ -48,6 +91,7 @@ internal static class Program
             CheckBranchSummaryRendering();
             CheckGraphBranchContext();
             Git(fixture, "init -b main");
+            Git(fixture, "config core.autocrlf false");
             Git(fixture, "config user.name Test");
             Git(fixture, "config user.email test@example.com");
             File.WriteAllText(Path.Combine(fixture, "tracked.txt"), "initial\n");
@@ -279,7 +323,7 @@ internal static class Program
             var cell = row.GetVisualDescendants().OfType<Border>().Single(x => x.Child is Views.CommitRefsPresenter { ShowBranchSummary: true });
             var label = (Views.CommitRefsPresenter)cell.Child;
             Check(label.BranchSummaryRight == 0 && !label.IsContextBranchSummary, "unlabeled branch cell is blank before hover");
-            list.SelectedItem = ancestor;
+            SelectRow(list, ancestor);
             PumpUntil(() => label.BranchSummaryText == "main");
             Check(label.Opacity == 0.7 && label.BranchSummaryHasRemote && label.BranchSummaryAdditionalCount == 0,
                 "selected row shows a grouped branch badge at 70 percent opacity");
@@ -291,7 +335,7 @@ internal static class Program
             Check(!connections.Connections.Any(x => x.End.Y == ancestorY), "hover badges do not draw connecting lines");
             Check(ToolTip.GetTip(cell) as string == "main\norigin/main", "hover tooltip includes all full branch names");
             Check(ancestor.Decorators.Count == 0, "hover does not add fake branch refs to the commit");
-            list.SelectedItem = tip;
+            SelectRow(list, tip);
             PumpUntil(() => label.BranchSummaryRight == 0);
             Check(!label.IsContextBranchSummary && label.Opacity == 1 && ToolTip.GetTip(cell) == null, "deselecting the unhovered row removes its branch badge and tooltip");
             var tipRow = list.GetVisualDescendants().OfType<DataGridRow>().Single(x => ReferenceEquals(x.DataContext, tip));
@@ -566,7 +610,7 @@ internal static class Program
         pref.WorkingDirectoryHeadMode = 2;
         PumpUntil(() => vm.Entries.Contains(vm.WorkingDirectory));
         Check(vm.IsWorkingDirectoryVisible && vm.WorkingDirectory.Modified + vm.WorkingDirectory.Added + vm.WorkingDirectory.Deleted == 0, "Always shows a clean working directory");
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.IsWorkingDirectorySelected);
         var graph = vm.Graph;
         vm.UpdateWorkingDirectory([new Change { Path = "tracked.txt", WorkTree = ChangeState.Modified }]);
@@ -592,7 +636,7 @@ internal static class Program
         pref.WorkingDirectoryHeadMode = 1;
         Check(ReferenceEquals(second.Graph, closedGraph), "closed histories unsubscribe from preferences");
         vm.UpdateWorkingDirectory([new Change { Path = "tracked.txt", WorkTree = ChangeState.Modified }]);
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.IsWorkingDirectorySelected);
     }
 
@@ -777,7 +821,7 @@ internal static class Program
         var vm = repo.Histories;
         var list = window.GetVisualDescendants().OfType<Views.HistoriesCommitList>().Single();
         Check(vm.Commits.Count == 1 && vm.Entries.Count == 2, "real commit count excludes working row");
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.IsWorkingDirectorySelected);
         Check(ReferenceEquals(vm.DetailContext, repo.WorkingCopy) && vm.SelectedCommits.Count == 0, "working selection uses shared model");
         PumpUntil(() => window.GetVisualDescendants().OfType<Views.WorkingCopy>().Any());
@@ -792,7 +836,7 @@ internal static class Program
         list.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.A, KeyModifiers = KeyModifiers.Control });
         PumpUntil(() => !vm.IsWorkingDirectorySelected);
         Check(list.SelectedItems.Count == vm.Commits.Count && vm.SelectedCommits.Count == vm.Commits.Count, "Select All contains only real commits");
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.IsWorkingDirectorySelected);
         var graph = vm.Graph;
         repo.WorkingCopy.CommitMessage = "Live subject\nBody";
@@ -809,10 +853,10 @@ internal static class Program
         vm.IsCollapseDetails = false;
         PumpUntil(() => window.GetVisualDescendants().OfType<Views.WorkingCopy>().Any());
         Check(ReferenceEquals(editor, window.GetVisualDescendants().OfType<Views.WorkingCopy>().Single()), "expand restores shared editor");
-        list.SelectedItem = vm.Commits[0];
+        SelectRow(list, vm.Commits[0]);
         PumpUntil(() => vm.DetailContext is CommitDetail);
         Check(!vm.IsWorkingDirectorySelected, "real commit restores details");
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.IsWorkingDirectorySelected);
         vm.NavigateTo(vm.Commits[0].SHA);
         PumpUntil(() => list.SelectedItem is Commit);
@@ -840,7 +884,7 @@ internal static class Program
         var fullHistory = vm.Commits;
         var filteredCommit = new Commit { SHA = fullHistory[0].SHA, Subject = fullHistory[0].Subject };
         vm.Commits = [filteredCommit];
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         list.SelectedItems.Add(filteredCommit);
         PumpUntil(() => vm.DetailContext is RevisionCompare);
         Preferences.Instance.WorkingDirectoryHeadMode = 0;
@@ -848,7 +892,7 @@ internal static class Program
         Check(vm.SelectedCommits.Single() == filteredCommit, "hiding the working row preserves comparison target when HEAD is filtered out");
         vm.Commits = fullHistory;
         Preferences.Instance.WorkingDirectoryHeadMode = 1;
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.DetailContext is WorkingCopy);
         graph = vm.Graph;
         vm.UpdateWorkingDirectory([new Change { Path = "tracked.txt", WorkTree = ChangeState.Modified },
@@ -861,7 +905,7 @@ internal static class Program
         PumpUntil(() => vm.DetailContext is CommitDetail);
         Check(vm.SelectedCommits.Count == 1 && vm.SelectedCommits[0].IsCurrentHead, "clean transition selects HEAD");
         vm.UpdateWorkingDirectory([new Change { Path = "tracked.txt", WorkTree = ChangeState.Modified }]);
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.IsWorkingDirectorySelected);
         var commits = vm.Commits;
         vm.Commits = [];
@@ -871,7 +915,7 @@ internal static class Program
         Check(list.SelectedItems.Count == 0, "clean transition without displayed HEAD clears details");
         vm.Commits = commits;
         vm.UpdateWorkingDirectory([new Change { Path = "tracked.txt", WorkTree = ChangeState.Modified }]);
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.IsWorkingDirectorySelected);
     }
 
@@ -1036,7 +1080,7 @@ internal static class Program
     {
         var vm = repo.Histories;
         var list = window.GetVisualDescendants().OfType<Views.HistoriesCommitList>().Single();
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         list.SelectedItems.Add(vm.Commits[0]);
         PumpUntil(() => vm.DetailContext is RevisionCompare);
         list.SelectedItems.Add(vm.Commits[1]);
@@ -1045,7 +1089,7 @@ internal static class Program
         vm.Commits = new List<Commit>(vm.Commits);
         PumpUntil(() => list.SelectedItems.Count == 2);
         Check(vm.SelectedCommits.Count == 2 && !vm.IsWorkingDirectorySelected, "history refresh preserves a normal two-commit comparison");
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.DetailContext is WorkingCopy);
     }
 
@@ -1057,7 +1101,7 @@ internal static class Program
         foreach (var variant in new[] { "Light", "Dark" })
         {
             Preferences.Instance.Theme = variant;
-            list.SelectedItem = vm.Commits[0];
+            SelectRow(list, vm.Commits[0]);
             PumpUntil(() => !vm.IsWorkingDirectorySelected);
             var row = list.GetVisualDescendants().OfType<DataGridRow>().Single(x => ReferenceEquals(x.DataContext, vm.WorkingDirectory));
             foreach (var cell in row.GetVisualDescendants().OfType<DataGridCell>().Where(x => x.IsEffectivelyVisible && x.Bounds.Width > 0))
@@ -1072,12 +1116,12 @@ internal static class Program
                 Check(vm.IsWorkingDirectorySelected && ReferenceEquals(vm.DetailContext, repo.WorkingCopy), $"clicking working row opens Local Changes: {variant}");
                 hit.RaiseEvent(new PointerReleasedEventArgs(hit, pointer, window, point, 0,
                     new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.LeftButtonReleased), KeyModifiers.None, MouseButton.Left));
-                list.SelectedItem = vm.Commits[0];
+                SelectRow(list, vm.Commits[0]);
                 PumpUntil(() => !vm.IsWorkingDirectorySelected);
             }
         }
         Preferences.Instance.Theme = theme;
-        list.SelectedItem = vm.WorkingDirectory;
+        SelectRow(list, vm.WorkingDirectory);
         PumpUntil(() => vm.IsWorkingDirectorySelected);
     }
 
@@ -1162,6 +1206,14 @@ internal static class Program
                 bitmap.Save(Path.Combine(AppContext.BaseDirectory, $"preview-{theme}-{horizontal}-{width}.png"));
             }
         }
+    }
+
+    private static void SelectRow(DataGrid grid, object item)
+    {
+        // Model publication may queue selection restoration after the next layout.
+        // Deliver the test click at input priority, just like a real pointer event.
+        Dispatcher.UIThread.Post(() => grid.SelectedItem = item, DispatcherPriority.Input);
+        Dispatcher.UIThread.RunJobs();
     }
 
     private static void PumpUntil(Func<bool> condition)

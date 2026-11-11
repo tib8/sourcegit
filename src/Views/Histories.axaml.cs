@@ -11,6 +11,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 
 namespace SourceGit.Views
@@ -132,9 +133,37 @@ namespace SourceGit.Views
 
         protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
         {
+            if (change.Property == ItemsSourceProperty)
+            {
+                // DataGrid restores its current row during the next layout pass. That
+                // automatic selection is not a user navigation and must not overwrite
+                // history/quick-search selection while replacing the complete source.
+                _restoringSelection = true;
+                var version = ++_itemsSourceVersion;
+                base.OnPropertyChanged(change);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (version != _itemsSourceVersion)
+                        return;
+                    try
+                    {
+                        UpdateLayout();
+                        ApplySelection();
+                        if (SelectedCommits is { Count: 1 } selected && ItemsSource is IList<object> items && items.Contains(selected[0]))
+                            ScrollIntoView(selected[0], null);
+                        else if (DataContext is ViewModels.Histories { IsWorkingDirectorySelected: true } histories)
+                            ScrollIntoView(histories.WorkingDirectory, null);
+                    }
+                    finally
+                    {
+                        _restoringSelection = false;
+                    }
+                }, DispatcherPriority.Loaded);
+                return;
+            }
             base.OnPropertyChanged(change);
 
-            if (change.Property == SelectedCommitsProperty && IsLoaded && !_ignoreSelectionChanged)
+            if (change.Property == SelectedCommitsProperty && IsLoaded && !_ignoreSelectionChanged && !_restoringSelection)
             {
                 ApplySelection();
                 if (change.NewValue is List<Models.Commit> { Count: 1 } selected)
@@ -148,7 +177,7 @@ namespace SourceGit.Views
         {
             base.OnSelectionChanged(e);
 
-            if (_ignoreSelectionChanged || DataContext is ViewModels.Histories { IsUpdatingEntries: true } or ViewModels.Histories { IsUpdatingQuickSearchFilter: true })
+            if (_ignoreSelectionChanged || _restoringSelection || DataContext is ViewModels.Histories { IsUpdatingEntries: true } or ViewModels.Histories { IsUpdatingQuickSearchFilter: true })
                 return;
 
             if (ItemsSource is not IList<object> items)
@@ -250,17 +279,23 @@ namespace SourceGit.Views
         {
             _ignoreSelectionChanged = true;
             SelectedItems.Clear();
-            if (DataContext is ViewModels.Histories { IsWorkingDirectorySelected: true } vm)
+            if (DataContext is ViewModels.Histories { IsWorkingDirectorySelected: true } vm &&
+                ItemsSource is IList<object> workingItems && workingItems.Contains(vm.WorkingDirectory))
                 SelectedItems.Add(vm.WorkingDirectory);
-            if (SelectedCommits != null)
+            if (SelectedCommits != null && ItemsSource is IList<object> items)
             {
                 foreach (var c in SelectedCommits)
-                    SelectedItems.Add(c);
+                {
+                    if (items.Contains(c))
+                        SelectedItems.Add(c);
+                }
             }
             _ignoreSelectionChanged = false;
         }
 
         private bool _ignoreSelectionChanged = false;
+        private bool _restoringSelection;
+        private int _itemsSourceVersion;
         private int _totalCommits = 0;
         private List<Models.Commit> _selectedCommits = [];
     }

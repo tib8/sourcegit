@@ -8,6 +8,8 @@
     <Compile Include="../../src/Models/RefreshCoordinator.cs" Link="RefreshCoordinator.cs" />
     <Compile Include="../../src/Models/WatcherRecovery.cs" Link="WatcherRecovery.cs" />
     <Compile Include="../../src/Models/Watcher.cs" Link="Watcher.cs" />
+    <Compile Include="../../src/Models/RepositoryOperationGate.cs" Link="RepositoryOperationGate.cs" />
+    <Compile Include="../../src/Models/IgnoredPaths.cs" Link="IgnoredPaths.cs" />
     <Compile Include="../../src/Models/IRepository.cs" Link="IRepository.cs" />
   </ItemGroup>
 </Project>

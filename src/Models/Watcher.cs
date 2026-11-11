@@ -8,77 +8,19 @@ namespace SourceGit.Models
 {
     public class Watcher : IDisposable
     {
-        public class LockContext : IDisposable
-        {
-            public LockContext(Watcher target)
-            {
-                _target = target;
-                Interlocked.Increment(ref _target._lockCount);
-            }
-
-            public void Dispose()
-            {
-                var target = Interlocked.Exchange(ref _target, null);
-                if (target != null)
-                    Interlocked.Decrement(ref target._lockCount);
-            }
-
-            private Watcher _target;
-        }
-
-        public Watcher(IRepository repo, string fullpath, string gitDir)
+        public Watcher(IRepository repo, string fullpath, string gitDir,
+            Func<string[], CancellationToken, Task<HashSet<string>>> queryIgnored = null, string worktreeGitDir = null)
         {
             _repo = repo;
             _root = new DirectoryInfo(fullpath).FullName;
+            _commonDir = RepositoryOperationGate.Key(gitDir);
+            _worktreeGitDir = RepositoryOperationGate.Key(worktreeGitDir ?? gitDir);
+            _queryIgnored = queryIgnored;
             _watchers = new List<FileSystemWatcher>();
 
-            var testGitDir = new DirectoryInfo(Path.Combine(fullpath, ".git")).FullName;
-            var desiredDir = new DirectoryInfo(gitDir).FullName;
-            if (testGitDir.Equals(desiredDir, StringComparison.Ordinal))
-            {
-                var combined = new FileSystemWatcher();
-                combined.Path = fullpath;
-                combined.Filter = "*";
-                combined.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.DirectoryName | NotifyFilters.FileName;
-                combined.IncludeSubdirectories = true;
-                combined.Created += OnRepositoryChanged;
-                combined.Renamed += OnRepositoryChanged;
-                combined.Changed += OnRepositoryChanged;
-                combined.Deleted += OnRepositoryChanged;
-                combined.Error += OnWatcherError;
-                combined.EnableRaisingEvents = false;
-
-                _watchers.Add(combined);
-            }
-            else
-            {
-                var wc = new FileSystemWatcher();
-                wc.Path = fullpath;
-                wc.Filter = "*";
-                wc.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.DirectoryName | NotifyFilters.FileName;
-                wc.IncludeSubdirectories = true;
-                wc.Created += OnWorkingCopyChanged;
-                wc.Renamed += OnWorkingCopyChanged;
-                wc.Changed += OnWorkingCopyChanged;
-                wc.Deleted += OnWorkingCopyChanged;
-                wc.Error += OnWatcherError;
-                wc.EnableRaisingEvents = false;
-
-                var git = new FileSystemWatcher();
-                git.Path = gitDir;
-                git.Filter = "*";
-                git.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.DirectoryName | NotifyFilters.FileName;
-                git.IncludeSubdirectories = true;
-                git.Created += OnGitDirChanged;
-                git.Renamed += OnGitDirChanged;
-                git.Changed += OnGitDirChanged;
-                git.Deleted += OnGitDirChanged;
-                git.Error += OnWatcherError;
-                git.EnableRaisingEvents = false;
-
-                _watchers.Add(wc);
-                _watchers.Add(git);
-            }
+            // Build output must never overflow the buffer used for shared Git metadata.
+            AddWatcher(fullpath, OnWorkingCopyChanged, OnWorkingCopyWatcherError);
+            AddWatcher(gitDir, OnGitDirChanged, OnWatcherError);
 
             _timer = new Timer(Tick, null, 100, 100);
 
@@ -103,15 +45,35 @@ namespace SourceGit.Models
             });
         }
 
-        public IDisposable Lock()
+        private void AddWatcher(string path, FileSystemEventHandler changed, ErrorEventHandler error)
         {
-            return new LockContext(this);
+            var watcher = new FileSystemWatcher(path)
+            {
+                Filter = "*",
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.DirectoryName | NotifyFilters.FileName,
+                IncludeSubdirectories = true,
+                InternalBufferSize = 64 * 1024,
+            };
+            watcher.Created += changed;
+            watcher.Changed += changed;
+            watcher.Deleted += changed;
+            watcher.Renamed += (sender, e) =>
+            {
+                // A tracked file renamed into an ignored path must refresh its old name.
+                changed(sender, new FileSystemEventArgs(WatcherChangeTypes.Deleted, path, e.OldName));
+                changed(sender, e);
+            };
+            watcher.Error += error;
+            _watchers.Add(watcher);
         }
+
+        public IDisposable Lock() => RepositoryOperationGate.Lock(_commonDir);
 
         public void MarkBranchUpdated()
         {
             Interlocked.Exchange(ref _updateBranch, 0);
             Interlocked.Exchange(ref _updateWC, 0);
+            Interlocked.Exchange(ref _branchChangesWorkingCopy, 0);
         }
 
         public void MarkTagUpdated()
@@ -142,6 +104,7 @@ namespace SourceGit.Models
                     return;
 
                 _disposed = true;
+                _ = _cancellation.CancelAsync();
                 _timer.Dispose();
                 foreach (var watcher in _watchers)
                     watcher.Dispose();
@@ -153,8 +116,16 @@ namespace SourceGit.Models
         {
             lock (_syncRoot)
             {
-                if (_disposed || Interlocked.Read(ref _lockCount) > 0)
+                if (_disposed || RepositoryOperationGate.IsLocked(_commonDir))
                     return;
+
+                if (_workingCopyRecovery.TryTake(Environment.TickCount64))
+                {
+                    _repo.RefreshWorkingCopyChanges();
+                    if (_repo.MayHaveSubmodules())
+                        _repo.RefreshSubmodules();
+                }
+                StartWorkingCopyCheck();
 
                 if (_recovery.IsPending)
                 {
@@ -167,6 +138,7 @@ namespace SourceGit.Models
                         Interlocked.Exchange(ref _updateStashes, -1);
                         Interlocked.Exchange(ref _updateWC, -1);
                         Interlocked.Exchange(ref _updateSubmodules, -1);
+                        Interlocked.Exchange(ref _branchChangesWorkingCopy, 0);
                         _repo.RefreshBranches();
                         _repo.RefreshWorktrees();
                         _repo.RefreshTags();
@@ -191,8 +163,8 @@ namespace SourceGit.Models
                     if (now > oldUpdateBranch)
                     {
                         refreshCommits = true;
-                        refreshSubmodules = _repo.MayHaveSubmodules();
-                        refreshWC = true;
+                        refreshWC = Interlocked.Exchange(ref _branchChangesWorkingCopy, 0) != 0;
+                        refreshSubmodules = refreshWC && _repo.MayHaveSubmodules();
 
                         _repo.RefreshBranches();
                         _repo.RefreshWorktrees();
@@ -265,25 +237,6 @@ namespace SourceGit.Models
             }
         }
 
-        private void OnRepositoryChanged(object o, FileSystemEventArgs e)
-        {
-            if (_disposed)
-                return;
-
-            _recovery.RecordActivity(Environment.TickCount64);
-            if (string.IsNullOrEmpty(e.Name) || e.Name.Equals(".git", StringComparison.Ordinal))
-                return;
-
-            var name = e.Name.Replace('\\', '/').TrimEnd('/');
-            if (name.EndsWith("/.git", StringComparison.Ordinal))
-                return;
-
-            if (name.StartsWith(".git/", StringComparison.Ordinal))
-                HandleGitDirFileChanged(name.Substring(5));
-            else
-                HandleWorkingCopyFileChanged(name, e.FullPath);
-        }
-
         /// <summary>
         ///     The internal buffer overflowed (a large fetch or checkout writes thousands of files), so
         ///     some events were dropped and we cannot know which. Coalesce recovery requests
@@ -308,26 +261,99 @@ namespace SourceGit.Models
             HandleGitDirFileChanged(name);
         }
 
-        private void OnWorkingCopyChanged(object o, FileSystemEventArgs e)
+        private void OnWorkingCopyWatcherError(object sender, ErrorEventArgs e)
         {
-            if (_disposed)
-                return;
+            if (!_disposed)
+                _workingCopyRecovery.Schedule(Environment.TickCount64);
+        }
 
-            _recovery.RecordActivity(Environment.TickCount64);
-            if (string.IsNullOrEmpty(e.Name))
+        private void OnWorkingCopyChanged(object sender, FileSystemEventArgs e)
+        {
+            if (_disposed || string.IsNullOrEmpty(e.Name))
                 return;
-
             var name = e.Name.Replace('\\', '/').TrimEnd('/');
-            if (name.Equals(".git", StringComparison.Ordinal) ||
-                name.StartsWith(".git/", StringComparison.Ordinal) ||
-                name.EndsWith("/.git", StringComparison.Ordinal))
+            if (name.Equals(".git", StringComparison.Ordinal) || name.StartsWith(".git/", StringComparison.Ordinal))
                 return;
+            _workingCopyRecovery.RecordActivity(Environment.TickCount64);
+            lock (_pendingPaths)
+            {
+                if (_pendingPaths.Count == 0)
+                    _firstPathActivity = Environment.TickCount64;
+                _lastPathActivity = Environment.TickCount64;
+                if (_pendingPaths.Count < 8192)
+                {
+                    _pendingPaths.Add(name);
+                    if (e.ChangeType != WatcherChangeTypes.Changed)
+                        _structuralPaths.Add(name);
+                }
+                else
+                    _workingCopyRecovery.Schedule(Environment.TickCount64);
+            }
+        }
 
-            HandleWorkingCopyFileChanged(name, e.FullPath);
+        // Called under _syncRoot. Native callbacks only enqueue paths; slow inspection runs
+        // on a worker, with at most one ignore query in flight per worktree.
+        private void StartWorkingCopyCheck()
+        {
+            if (_checkingPaths)
+                return;
+            string[] paths;
+            HashSet<string> structuralPaths;
+            lock (_pendingPaths)
+            {
+                var now = Environment.TickCount64;
+                if (_pendingPaths.Count == 0 || (now - _lastPathActivity < 1000 && now - _firstPathActivity < 5000))
+                    return;
+                paths = new string[_pendingPaths.Count];
+                _pendingPaths.CopyTo(paths);
+                _pendingPaths.Clear();
+                structuralPaths = new(_structuralPaths, StringComparer.Ordinal);
+                _structuralPaths.Clear();
+            }
+            _checkingPaths = true;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var ignored = _queryIgnored == null ? new HashSet<string>() : await _queryIgnored(paths, _cancellation.Token).ConfigureAwait(false);
+                    foreach (var name in paths)
+                    {
+                        var fullpath = Path.Combine(_root, name);
+                        // A directory's timestamp changes when ignored children are written.
+                        // Creation/deletion/rename must still inspect its tracked descendants.
+                        if (!structuralPaths.Contains(name) && Directory.Exists(fullpath))
+                            continue;
+                        if (ignored.Contains(name) && !name.Equals(".gitignore", StringComparison.Ordinal) &&
+                            !name.EndsWith("/.gitignore", StringComparison.Ordinal))
+                            continue;
+                        HandleWorkingCopyFileChanged(name, fullpath);
+                    }
+                }
+                catch (OperationCanceledException) when (_disposed) { }
+                catch
+                {
+                    // Failure must never hide real edits.
+                    Interlocked.Exchange(ref _updateWC, DateTime.Now.ToFileTime());
+                    if (_repo.MayHaveSubmodules())
+                        Interlocked.Exchange(ref _updateSubmodules, DateTime.Now.ToFileTime());
+                }
+                finally
+                {
+                    lock (_syncRoot)
+                        _checkingPaths = false;
+                }
+            });
         }
 
         private void HandleGitDirFileChanged(string name)
         {
+            if (name.StartsWith("worktrees/", StringComparison.Ordinal))
+            {
+                var localPrefix = Path.GetRelativePath(_commonDir, _worktreeGitDir).Replace('\\', '/') + "/";
+                if (name.StartsWith(localPrefix, StringComparison.Ordinal))
+                    name = name.Substring(localPrefix.Length);
+            }
+
             if (name.Contains("fsmonitor--daemon/", StringComparison.Ordinal) ||
                 name.EndsWith(".lock", StringComparison.Ordinal) ||
                 name.StartsWith("lfs/", StringComparison.Ordinal))
@@ -365,22 +391,28 @@ namespace SourceGit.Models
                 name.StartsWith("refs/remotes/", StringComparison.Ordinal) ||
                 (name.StartsWith("worktrees/", StringComparison.Ordinal) && name.EndsWith("/HEAD", StringComparison.Ordinal)))
             {
+                // Remote refs and other worktrees' HEADs cannot change this worktree's status.
+                if (!name.StartsWith("refs/remotes/", StringComparison.Ordinal) &&
+                    !name.StartsWith("worktrees/", StringComparison.Ordinal))
+                    Interlocked.Exchange(ref _branchChangesWorkingCopy, 1);
                 Interlocked.Exchange(ref _updateBranch, DateTime.Now.AddSeconds(.5).ToFileTime());
             }
             else if (name.Equals("packed-refs", StringComparison.Ordinal))
             {
+                Interlocked.Exchange(ref _branchChangesWorkingCopy, 1);
                 var desired = DateTime.Now.AddSeconds(.5).ToFileTime();
                 Interlocked.Exchange(ref _updateBranch, desired);
                 Interlocked.Exchange(ref _updateTags, desired);
             }
             else if (name.StartsWith("reftable/", StringComparison.Ordinal))
             {
+                Interlocked.Exchange(ref _branchChangesWorkingCopy, 1);
                 var desired = DateTime.Now.AddSeconds(.5).ToFileTime();
                 Interlocked.Exchange(ref _updateBranch, desired);
                 Interlocked.Exchange(ref _updateTags, desired);
                 Interlocked.Exchange(ref _updateStashes, desired);
             }
-            else if (name.StartsWith("objects/", StringComparison.Ordinal) || name.Equals("index", StringComparison.Ordinal))
+            else if (name.Equals("index", StringComparison.Ordinal) || name.Equals("info/exclude", StringComparison.Ordinal))
             {
                 Interlocked.Exchange(ref _updateWC, DateTime.Now.AddSeconds(1).ToFileTime());
             }
@@ -388,9 +420,6 @@ namespace SourceGit.Models
 
         private void HandleWorkingCopyFileChanged(string name, string fullpath)
         {
-            if (name.StartsWith(".vs/", StringComparison.Ordinal))
-                return;
-
             if (name.Equals(".gitmodules", StringComparison.Ordinal))
             {
                 var desired = DateTime.Now.AddSeconds(1).ToFileTime();
@@ -428,9 +457,19 @@ namespace SourceGit.Models
         private List<FileSystemWatcher> _watchers;
         private Timer _timer;
 
-        private long _lockCount;
+        private readonly string _commonDir;
+        private readonly string _worktreeGitDir;
+        private readonly Func<string[], CancellationToken, Task<HashSet<string>>> _queryIgnored;
+        private readonly CancellationTokenSource _cancellation = new();
+        private readonly WatcherRecovery _workingCopyRecovery = new();
+        private readonly HashSet<string> _pendingPaths = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _structuralPaths = new(StringComparer.Ordinal);
+        private bool _checkingPaths;
+        private long _firstPathActivity;
+        private long _lastPathActivity;
         private long _updateWC;
         private long _updateBranch;
+        private int _branchChangesWorkingCopy;
         private long _updateSubmodules;
         private long _updateStashes;
         private long _updateTags;

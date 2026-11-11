@@ -13,7 +13,40 @@ internal static class Program
         CheckHighlighting();
         CheckSmallPalettes();
         CheckMasterGraphFeatures();
+        CheckDetachedSnapshot();
         Console.WriteLine($"PASS: {_checks} commit graph checks");
+    }
+
+    private static void CheckDetachedSnapshot()
+    {
+        var root = new Commit { SHA = "snapshot-root" };
+        var head = Commit("snapshot-head", root, "HEAD -> refs/heads/main");
+        var tip = Commit("snapshot-tip", head, "refs/heads/topic");
+        List<Commit> all = [tip, head, root];
+        foreach (var filtered in new[] { false, true })
+        {
+            var visible = filtered ? new List<Commit> { tip, root } : all;
+            var expected = filtered ? CommitGraph.GenerateFiltered(all, visible, false, CommitGraphHighlighting.All, [], true) :
+                CommitGraph.Generate(visible, false, CommitGraphHighlighting.All, [], true);
+            var colors = visible.Select(c => c.Color).ToArray();
+            var margins = visible.Select(c => c.LeftMargin).ToArray();
+            var snapshot = new CommitGraph.Snapshot(all, visible, filtered, false, CommitGraphHighlighting.All, [], true, true, 0);
+            foreach (var c in visible) { c.Color = 99; c.LeftMargin = 999; }
+            // A concurrent theme change must not affect the captured graph calculation.
+            CommitGraph.SetPens([Avalonia.Media.Colors.Red], 2);
+            var actual = Task.Run(() => snapshot.Generate(CancellationToken.None)).GetAwaiter().GetResult();
+            Check(visible.All(c => c.Color == 99 && c.LeftMargin == 999), "background graph never mutates bound commits");
+            Check(actual.Dots.Select(d => (d.Center, d.Color)).SequenceEqual(expected.Dots.Select(d => (d.Center, d.Color))), "snapshot preserves graph layout and captured colors");
+            snapshot.Apply();
+            Check(visible.Select(c => c.Color).SequenceEqual(colors) && visible.Select(c => c.LeftMargin).SequenceEqual(margins), "snapshot publishes the matching commit presentation");
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            var cancelled = false;
+            try { snapshot.Generate(cancellation.Token); }
+            catch (OperationCanceledException) { cancelled = true; }
+            Check(cancelled, "superseded graph computations can be cancelled");
+            CommitGraph.SetDefaultPens();
+        }
     }
 
     private static void CheckStackedBranches()
