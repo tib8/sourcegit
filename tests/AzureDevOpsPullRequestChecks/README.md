@@ -6,6 +6,8 @@ Authorship checks use real temporary Git commits with different author/committer
 
 The HTTP handler and authentication provider are synthetic. The checks use a temporary local Git repository and temporary preferences, and make no live Azure DevOps requests. No user account or application registration is required.
 
+Combined-action checks push only to a temporary local bare repository. They cover unpublished previews, a successful push before creation, rejected/cancelled/uncertain pushes, published-source retries, source changes after preview, late duplicates, rejected PR creation after a successful push, missing target objects, non-fast-forward protection, tag exclusion, and changed/multiple push URLs. Reviewer checks verify a shared search/selection group, name preference, and email deduplication.
+
 Sign-in regression cases distinguish successful Microsoft authentication from a denied repository request, verify tenant-mismatch explanations and API redirect suppression, and ensure retrying repository loading does not start another interactive sign-in or perform any writes.
 
 PAT regression cases cover Basic authentication, masked input, account identification, organization-isolated credential storage, reconnection, storage failures, sign-out failures, expiration/permission errors, and PR creation with reviewers and auto-complete. They verify that synthetic secrets are absent from ordinary preferences and repository settings. Credential storage is injected; tests do not access real saved PATs. `--render` also saves light and dark images of the PAT connection panel.
