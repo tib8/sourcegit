@@ -342,10 +342,17 @@
                     <ContentControl.DataTemplates>
                       <DataTemplate DataType="m:Commit">
                         <Border Padding="8,0,0,0" Background="Transparent" ClipToBounds="True">
-                          <TextBlock Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
+                          <TextBlock
                                      FontFamily="{DynamicResource Fonts.Monospace}"
                                      FontWeight="{Binding IsCurrentHead, Converter={x:Static c:BoolConverters.IsBoldToFontWeight}}"
-                                     Opacity="{Binding IsMerged, Converter={x:Static c:BoolConverters.IsMergedToOpacity}}"/>
+                                     Opacity="{Binding IsMerged, Converter={x:Static c:BoolConverters.IsMergedToOpacity}}">
+                            <TextBlock.Text>
+                              <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                                <Binding Path="SHA"/>
+                                <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                              </MultiBinding>
+                            </TextBlock.Text>
+                          </TextBlock>
                         </Border>
                       </DataTemplate>
                       <DataTemplate DataType="vm:WorkingDirectoryEntry"><TextBlock/></DataTemplate>

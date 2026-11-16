@@ -87,14 +87,20 @@
                   <v:Avatar Grid.Column="0" Width="16" Height="16" VerticalAlignment="Center" IsHitTestVisible="False" User="{Binding Author}"/>
                   <TextBlock Grid.Column="1" Text="{Binding Author.Name}" Margin="8,0,0,0" TextTrimming="CharacterEllipsis"/>
                   <TextBlock Grid.Column="2"
-                             Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                              FontFamily="{DynamicResource Fonts.Monospace}"
                              Cursor="Hand"
                              Background="Transparent"
                              Foreground="DarkOrange"
                              TextDecorations="Underline"
                              Margin="8,0,0,0"
-                             PointerPressed="OnPressCommitSHA"/>
+                             PointerPressed="OnPressCommitSHA">
+                    <TextBlock.Text>
+                      <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                        <Binding Path="SHA"/>
+                        <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                      </MultiBinding>
+                    </TextBlock.Text>
+                  </TextBlock>
                   <v:DateTimePresenter Grid.Column="3"
                                        Margin="8,0,0,0"
                                        ShowDateOnly="True"

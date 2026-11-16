@@ -288,7 +288,7 @@ namespace SourceGit.Views
                 {
                     var builder = new StringBuilder();
                     foreach (var c in commits)
-                        builder.Append(c.SHA.Substring(0, 10)).Append(" - ").AppendLine(c.Subject);
+                        builder.Append(Models.CommitSHA.Shorten(c.SHA)).Append(" - ").AppendLine(c.Subject);
 
                     await this.CopyTextAsync(builder.ToString());
                     ev.Handled = true;

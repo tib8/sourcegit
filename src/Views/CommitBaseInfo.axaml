@@ -121,7 +121,7 @@
               <DataTemplate>
                 <Grid ColumnDefinitions="20,*" Margin="0,0,12,0">
                   <v:CopyButton Grid.Column="0" Width="20" Height="24" CopyText="{Binding}" ToolTip.Tip="{Binding $self.CopyText, Converter={x:Static c:StringConverters.FormatByResourceKey}, ConverterParameter=CopyWithText}"/>
-                  <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding Converter={x:Static c:StringConverters.ToShortSHA}}"
+                  <TextBlock Grid.Column="1" VerticalAlignment="Center"
                              FontFamily="{DynamicResource Fonts.Monospace}"
                              Foreground="DarkOrange"
                              TextDecorations="Underline"
@@ -131,6 +131,12 @@
                              PointerPressed="OnSHAPressed"
                              ContextRequested="OnSHAContextRequested"
                              ToolTip.ShowDelay="0">
+                    <TextBlock.Text>
+                      <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                        <Binding Path="."/>
+                        <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                      </MultiBinding>
+                    </TextBlock.Text>
                     <ToolTip.IsOpen>
                       <MultiBinding Converter="{x:Static BoolConverters.And}">
                         <Binding Path="$self.IsPointerOver"/>

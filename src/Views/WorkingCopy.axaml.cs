@@ -379,7 +379,7 @@ namespace SourceGit.Views
                             useMine.Header = App.Text("FileCM.ResolveUsing", rebase.BaseName);
                             break;
                         case ViewModels.RevertInProgress revert:
-                            useTheirs.Header = App.Text("FileCM.ResolveUsing", $"{revert.Head.SHA.AsSpan(0, 10)} (revert)");
+                            useTheirs.Header = App.Text("FileCM.ResolveUsing", $"{Models.CommitSHA.Shorten(revert.Head.SHA)} (revert)");
                             useMine.Header = App.Text("FileCM.ResolveUsing", repo.CurrentBranch.Name);
                             break;
                         case ViewModels.MergeInProgress merge:
@@ -799,7 +799,7 @@ namespace SourceGit.Views
                             useMine.Header = App.Text("FileCM.ResolveUsing", rebase.BaseName);
                             break;
                         case ViewModels.RevertInProgress revert:
-                            useTheirs.Header = App.Text("FileCM.ResolveUsing", $"{revert.Head.SHA.AsSpan(0, 10)} (revert)");
+                            useTheirs.Header = App.Text("FileCM.ResolveUsing", $"{Models.CommitSHA.Shorten(revert.Head.SHA)} (revert)");
                             useMine.Header = App.Text("FileCM.ResolveUsing", repo.CurrentBranch.Name);
                             break;
                         case ViewModels.MergeInProgress merge:

@@ -143,6 +143,20 @@ namespace SourceGit.ViewModels
             set => SetProperty(ref _subjectGuideLength, value);
         }
 
+        public int ShortSHALength
+        {
+            get => Models.CommitSHA.ShortLength;
+            set
+            {
+                var length = Math.Clamp(value, Models.CommitSHA.MinShortLength, Models.CommitSHA.MaxShortLength);
+                if (length != Models.CommitSHA.ShortLength)
+                {
+                    Models.CommitSHA.ShortLength = length;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
         public int DateTimeFormat
         {
             get => Models.DateTimeFormat.ActiveIndex;

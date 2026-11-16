@@ -32,7 +32,7 @@ namespace SourceGit.Commands
             var head = lines[1].Substring(14).Trim(); // Remove "# branch.head " prefix
 
             if (head.Equals("(detached)", StringComparison.Ordinal))
-                status.CurrentBranch = sha1.Length > 10 ? $"({sha1.Substring(0, 10)})" : "-";
+                status.CurrentBranch = sha1.Length > 10 ? $"({Models.CommitSHA.Shorten(sha1)})" : "-";
             else
                 status.CurrentBranch = head;
 

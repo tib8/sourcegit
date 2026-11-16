@@ -32,12 +32,18 @@
                                        VerticalAlignment="Center"
                                        UseGraphColor="False"/>
                 <TextBlock Margin="4,0,0,0"
-                           Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                            FontFamily="{DynamicResource Fonts.Monospace}"
                            Foreground="DarkOrange"
                            TextDecorations="Underline"
                            Cursor="Hand"
-                           PointerPressed="OnPressedSHA"/>
+                           PointerPressed="OnPressedSHA">
+                  <TextBlock.Text>
+                    <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                      <Binding Path="SHA"/>
+                      <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                    </MultiBinding>
+                  </TextBlock.Text>
+                </TextBlock>
                 <TextBlock Margin="4,0,0,0" Text="{Binding Subject}"/>
               </StackPanel>
             </DataTemplate>

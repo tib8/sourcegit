@@ -127,8 +127,14 @@
                 <TextBlock Grid.Column="0"
                            FontWeight="Bold"
                            Margin="0,0,6,0"
-                           FontFamily="{DynamicResource Fonts.Monospace}"
-                           Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}, Mode=OneWay}"/>
+                           FontFamily="{DynamicResource Fonts.Monospace}">
+                  <TextBlock.Text>
+                    <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                      <Binding Path="SHA"/>
+                      <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                    </MultiBinding>
+                  </TextBlock.Text>
+                </TextBlock>
 
                 <TextBlock Grid.Column="1"
                            Text="{Binding Subject}"
