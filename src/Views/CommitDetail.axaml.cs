@@ -278,7 +278,7 @@ namespace SourceGit.Views
             copyPath.Tag = OperatingSystem.IsMacOS() ? "⌘+C" : "Ctrl+C";
             copyPath.Click += async (_, ev) =>
             {
-                await this.CopyTextAsync(change.Path);
+                await this.CopyPathAsync(change.Path);
                 ev.Handled = true;
             };
 
@@ -288,7 +288,7 @@ namespace SourceGit.Views
             copyFullPath.Tag = OperatingSystem.IsMacOS() ? "⌘+⇧+C" : "Ctrl+Shift+C";
             copyFullPath.Click += async (_, e) =>
             {
-                await this.CopyTextAsync(fullPath);
+                await this.CopyPathAsync(fullPath);
                 e.Handled = true;
             };
 
@@ -322,9 +322,9 @@ namespace SourceGit.Views
                 e.KeyModifiers.HasFlag(OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control))
             {
                 if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-                    await this.CopyTextAsync(vm.GetAbsPath(change.Path));
+                    await this.CopyPathAsync(vm.GetAbsPath(change.Path));
                 else
-                    await this.CopyTextAsync(change.Path);
+                    await this.CopyPathAsync(change.Path);
 
                 e.Handled = true;
                 return;

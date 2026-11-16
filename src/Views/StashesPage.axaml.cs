@@ -211,11 +211,11 @@ namespace SourceGit.Views
                 {
                     if (selectedSingleFolder)
                     {
-                        await this.CopyTextAsync(relativePathOfFolder);
+                        await this.CopyPathAsync(relativePathOfFolder);
                     }
                     else if (selection.Changes.Count == 1)
                     {
-                        await this.CopyTextAsync(selection.Changes[0].Path);
+                        await this.CopyPathAsync(selection.Changes[0].Path);
                     }
                     else
                     {
@@ -223,7 +223,7 @@ namespace SourceGit.Views
                         foreach (var c in selection.Changes)
                             builder.AppendLine(c.Path);
 
-                        await this.CopyTextAsync(builder.ToString());
+                        await this.CopyPathAsync(builder.ToString());
                     }
 
                     ev.Handled = true;
@@ -237,11 +237,11 @@ namespace SourceGit.Views
                 {
                     if (selectedSingleFolder)
                     {
-                        await this.CopyTextAsync(fullPathOfFolder);
+                        await this.CopyPathAsync(fullPathOfFolder);
                     }
                     else if (selection.Changes.Count == 1)
                     {
-                        await this.CopyTextAsync(vm.GetAbsPath(selection.Changes[0].Path));
+                        await this.CopyPathAsync(vm.GetAbsPath(selection.Changes[0].Path));
                     }
                     else
                     {
@@ -249,7 +249,7 @@ namespace SourceGit.Views
                         foreach (var c in selection.Changes)
                             builder.AppendLine(vm.GetAbsPath(c.Path));
 
-                        await this.CopyTextAsync(builder.ToString());
+                        await this.CopyPathAsync(builder.ToString());
                     }
 
                     ev.Handled = true;
@@ -289,7 +289,7 @@ namespace SourceGit.Views
                         builder.AppendLine(copyAbsPath ? vm.GetAbsPath(c.Path) : c.Path);
                 }
 
-                await this.CopyTextAsync(builder.ToString());
+                await this.CopyPathAsync(builder.ToString());
                 e.Handled = true;
             }
         }

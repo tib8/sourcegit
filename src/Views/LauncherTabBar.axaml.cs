@@ -361,7 +361,7 @@ namespace SourceGit.Views
                     copyPath.Click += async (_, ev) =>
                     {
                         var dir = new DirectoryInfo(repo.FullPath);
-                        await this.CopyTextAsync(dir.FullName);
+                        await this.CopyPathAsync(dir.FullName);
                         ev.Handled = true;
                     };
                     menu.Items.Add(copyPath);
