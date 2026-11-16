@@ -161,8 +161,14 @@
                                  Margin="4,0,0,0"
                                  Foreground="DarkOrange"
                                  FontFamily="{DynamicResource Fonts.Monospace}"
-                                 Text="{Binding Head.SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
-                                 ToolTip.Tip="{Binding Head}"/>
+                                 ToolTip.Tip="{Binding Head}">
+                        <TextBlock.Text>
+                          <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                            <Binding Path="Head.SHA"/>
+                            <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                          </MultiBinding>
+                        </TextBlock.Text>
+                      </TextBlock>
                     </StackPanel>
 
                     <Button Grid.Column="1" Classes="flat" FontWeight="Regular" BorderThickness="0" Content="{DynamicResource Text.Repository.Skip}" Padding="8,2" Click="OnSkipInProgress"/>
@@ -179,10 +185,16 @@
                       <TextBlock FontWeight="Bold"
                                  Margin="4,0,0,0"
                                  Foreground="DarkOrange"
-                                 Text="{Binding StoppedAt.SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                                  FontFamily="{DynamicResource Fonts.Monospace}"
                                  IsVisible="{Binding StoppedAt, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                 ToolTip.Tip="{Binding StoppedAt}" />
+                                 ToolTip.Tip="{Binding StoppedAt}">
+                        <TextBlock.Text>
+                          <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                            <Binding Path="StoppedAt.SHA"/>
+                            <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                          </MultiBinding>
+                        </TextBlock.Text>
+                      </TextBlock>
                     </StackPanel>
 
                     <Button Grid.Column="1" Classes="flat" FontWeight="Regular" BorderThickness="0"
@@ -200,8 +212,14 @@
                                  Margin="4,0,0,0"
                                  Foreground="DarkOrange"
                                  FontFamily="{DynamicResource Fonts.Monospace}"
-                                 Text="{Binding Head.SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
-                                 ToolTip.Tip="{Binding Head}"/>
+                                 ToolTip.Tip="{Binding Head}">
+                        <TextBlock.Text>
+                          <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                            <Binding Path="Head.SHA"/>
+                            <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                          </MultiBinding>
+                        </TextBlock.Text>
+                      </TextBlock>
                     </StackPanel>
 
                     <Button Grid.Column="1" Classes="flat" FontWeight="Regular" BorderThickness="0" Content="{DynamicResource Text.Repository.Skip}" Padding="8,2" Click="OnSkipInProgress"/>
@@ -558,8 +576,14 @@
                                     Width="14" Height="14"
                                     Data="{StaticResource Icons.Commit}"/>
                               <TextBlock Grid.Row="2" Grid.Column="3"
-                                         Margin="6,0,0,0"
-                                         Text="{Binding Head, Mode=OneWay, Converter={x:Static c:StringConverters.ToShortSHA}}"/>
+                                         Margin="6,0,0,0">
+                                <TextBlock.Text>
+                                  <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                                    <Binding Path="Head"/>
+                                    <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                                  </MultiBinding>
+                                </TextBlock.Text>
+                              </TextBlock>
                             </Grid>
                           </StackPanel>
                         </ToolTip.Tip>

@@ -49,7 +49,7 @@ namespace SourceGit.Models
             if (tagDecorator != null)
                 return tagDecorator.Name;
 
-            return SHA[..10];
+            return CommitSHA.Shorten(SHA);
         }
 
         public void ParseParents(string data)

@@ -66,8 +66,18 @@ namespace SourceGit.Converters
 
         public static readonly FormatByResourceKeyConverter FormatByResourceKey = new FormatByResourceKeyConverter();
 
-        public static readonly FuncValueConverter<string, string> ToShortSHA =
-            new FuncValueConverter<string, string>(v => v == null ? string.Empty : (v.Length > 10 ? v.Substring(0, 10) : v));
+        public class ToShortSHAConverter : IMultiValueConverter
+        {
+            public object Convert(IList<object> values, Type targetType, object parameter, CultureInfo culture)
+            {
+                if (values is not { Count: 2 } || values[1] is not int length)
+                    return string.Empty;
+
+                return Models.CommitSHA.Shorten(values[0] as string, length);
+            }
+        }
+
+        public static readonly ToShortSHAConverter ToShortSHA = new ToShortSHAConverter();
 
         public static readonly FuncValueConverter<string, string> TrimRefsPrefix =
             new FuncValueConverter<string, string>(v =>

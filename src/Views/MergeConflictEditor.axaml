@@ -96,10 +96,16 @@
                                                UseGraphColor="False"/>
                         <TextBlock Margin="4,0,0,0"
                                    FontFamily="{DynamicResource Fonts.Monospace}"
-                                   Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                                    Foreground="DarkOrange"
                                    TextDecorations="Underline"
-                                   Cursor="Hand"/>
+                                   Cursor="Hand">
+                          <TextBlock.Text>
+                            <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                              <Binding Path="SHA"/>
+                              <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                            </MultiBinding>
+                          </TextBlock.Text>
+                        </TextBlock>
                         <TextBlock Margin="4,0,0,0" Text="{Binding Subject}"/>
                       </StackPanel>
                     </DataTemplate>
@@ -163,10 +169,16 @@
                                                UseGraphColor="False"/>
                         <TextBlock Margin="4,0,0,0"
                                    FontFamily="{DynamicResource Fonts.Monospace}"
-                                   Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                                    Foreground="DarkOrange"
                                    TextDecorations="Underline"
-                                   Cursor="Hand"/>
+                                   Cursor="Hand">
+                          <TextBlock.Text>
+                            <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                              <Binding Path="SHA"/>
+                              <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                            </MultiBinding>
+                          </TextBlock.Text>
+                        </TextBlock>
                         <TextBlock Margin="4,0,0,0" Text="{Binding Subject}"/>
                       </StackPanel>
                     </DataTemplate>

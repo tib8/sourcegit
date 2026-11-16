@@ -47,9 +47,15 @@
                   <Path Width="14" Height="14" Data="{StaticResource Icons.Commit}"/>
 
                   <TextBlock Margin="8,0,0,0"
-                             Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                              FontFamily="{DynamicResource Fonts.Monospace}"
-                             VerticalAlignment="Center"/>
+                             VerticalAlignment="Center">
+                    <TextBlock.Text>
+                      <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                        <Binding Path="SHA"/>
+                        <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                      </MultiBinding>
+                    </TextBlock.Text>
+                  </TextBlock>
 
                   <Path Margin="6,0,0,0"
                         HorizontalAlignment="Left" VerticalAlignment="Center"
@@ -182,9 +188,15 @@
                       <Path Width="14" Height="14" Data="{StaticResource Icons.Commit}"/>
 
                       <TextBlock Margin="8,0,0,0"
-                                 Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                                  FontFamily="{DynamicResource Fonts.Monospace}"
-                                 VerticalAlignment="Center"/>
+                                 VerticalAlignment="Center">
+                        <TextBlock.Text>
+                          <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                            <Binding Path="SHA"/>
+                            <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                          </MultiBinding>
+                        </TextBlock.Text>
+                      </TextBlock>
 
                       <Path Margin="6,0,0,0"
                             HorizontalAlignment="Left" VerticalAlignment="Center"

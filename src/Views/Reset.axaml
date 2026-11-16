@@ -36,10 +36,16 @@
       <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="Auto,Auto,*" Height="20" VerticalAlignment="Center">
         <Path Grid.Column="0" Margin="0,0,8,0" Width="14" Height="14" Fill="{DynamicResource Brush.FG1}" Data="{StaticResource Icons.Commit}"/>
         <TextBlock Grid.Column="1"
-                   Text="{Binding To.SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                    FontFamily="{DynamicResource Fonts.Monospace}"
                    VerticalAlignment="Center"
-                   Foreground="DarkOrange"/>
+                   Foreground="DarkOrange">
+          <TextBlock.Text>
+            <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+              <Binding Path="To.SHA"/>
+              <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+            </MultiBinding>
+          </TextBlock.Text>
+        </TextBlock>
         <TextBlock Grid.Column="2"
                    Text="{Binding To.Subject}"
                    Margin="8,0,0,0"

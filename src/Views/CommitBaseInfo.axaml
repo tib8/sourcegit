@@ -108,8 +108,7 @@
 
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <TextBlock Text="{Binding Converter={x:Static c:StringConverters.ToShortSHA}}"
-                           FontFamily="{DynamicResource Fonts.Monospace}"
+                <TextBlock FontFamily="{DynamicResource Fonts.Monospace}"
                            Foreground="DarkOrange"
                            TextDecorations="Underline"
                            Cursor="Hand"
@@ -118,6 +117,12 @@
                            PointerPressed="OnSHAPressed"
                            ContextRequested="OnSHAContextRequested"
                            ToolTip.ShowDelay="0">
+                  <TextBlock.Text>
+                    <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                      <Binding Path="."/>
+                      <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                    </MultiBinding>
+                  </TextBlock.Text>
                   <ToolTip.IsOpen>
                     <MultiBinding Converter="{x:Static BoolConverters.And}">
                       <Binding Path="$self.IsPointerOver"/>

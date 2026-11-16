@@ -55,9 +55,15 @@
               <TextBlock Grid.Column="1"
                          FontFamily="{DynamicResource Fonts.Monospace}"
                          VerticalAlignment="Center"
-                         Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                          Foreground="DarkOrange"
-                         Margin="6,0,4,0"/>
+                         Margin="6,0,4,0">
+                <TextBlock.Text>
+                  <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                    <Binding Path="SHA"/>
+                    <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                  </MultiBinding>
+                </TextBlock.Text>
+              </TextBlock>
               <TextBlock Grid.Column="2"
                          VerticalAlignment="Center"
                          Text="{Binding Subject}"
@@ -84,9 +90,15 @@
                 <TextBlock Grid.Column="0"
                            FontFamily="{DynamicResource Fonts.Monospace}"
                            VerticalAlignment="Center"
-                           Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                            Foreground="DarkOrange"
-                           Margin="6,0,4,0"/>
+                           Margin="6,0,4,0">
+                  <TextBlock.Text>
+                    <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                      <Binding Path="SHA"/>
+                      <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                    </MultiBinding>
+                  </TextBlock.Text>
+                </TextBlock>
                 <TextBlock Grid.Column="1"
                            VerticalAlignment="Center"
                            Text="{Binding Subject}"

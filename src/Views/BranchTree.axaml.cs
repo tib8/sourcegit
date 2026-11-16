@@ -935,7 +935,7 @@ namespace SourceGit.Views
                     if (selectedCommit != null && !selectedCommit.SHA.Equals(branch.Head, StringComparison.Ordinal))
                     {
                         var move = new MenuItem();
-                        move.Header = App.Text("BranchCM.ResetToSelectedCommit", branch.Name, selectedCommit.SHA.Substring(0, 10));
+                        move.Header = App.Text("BranchCM.ResetToSelectedCommit", branch.Name, Models.CommitSHA.Shorten(selectedCommit.SHA));
                         move.Icon = this.CreateMenuIcon("Icons.Reset");
                         move.Click += (_, e) =>
                         {

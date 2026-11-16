@@ -55,13 +55,19 @@
                 </StackPanel>
               </Border>
               <TextBlock Grid.Column="3"
-                         Text="{Binding BaseHead.SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                          FontFamily="{DynamicResource Fonts.Monospace}"
                          Foreground="DarkOrange"
                          Margin="8,0,0,0"
                          TextDecorations="Underline"
                          Cursor="Hand"
-                         PointerPressed="OnPressedSHA"/>
+                         PointerPressed="OnPressedSHA">
+                <TextBlock.Text>
+                  <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                    <Binding Path="BaseHead.SHA"/>
+                    <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                  </MultiBinding>
+                </TextBlock.Text>
+              </TextBlock>
               <v:DateTimePresenter Grid.Column="4"
                                    Margin="8,0,0,0"
                                    Timestamp="{Binding BaseHead.CommitterTime}"
@@ -99,13 +105,19 @@
                 </StackPanel>
               </Border>
               <TextBlock Grid.Column="3"
-                         Text="{Binding ToHead.SHA, Converter={x:Static c:StringConverters.ToShortSHA}}"
                          FontFamily="{DynamicResource Fonts.Monospace}"
                          Foreground="DarkOrange"
                          Margin="8,0,0,0"
                          TextDecorations="Underline"
                          Cursor="Hand"
-                         PointerPressed="OnPressedSHA"/>
+                         PointerPressed="OnPressedSHA">
+                <TextBlock.Text>
+                  <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                    <Binding Path="ToHead.SHA"/>
+                    <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                  </MultiBinding>
+                </TextBlock.Text>
+              </TextBlock>
               <v:DateTimePresenter Grid.Column="4"
                                    Margin="8,0,0,0"
                                    Timestamp="{Binding ToHead.CommitterTime}"

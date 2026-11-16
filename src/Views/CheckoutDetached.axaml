@@ -39,8 +39,14 @@
                          FontFamily="{DynamicResource Fonts.Monospace}"
                          Foreground="DarkOrange"
                          VerticalAlignment="Center"
-                         Margin="8,0"
-                         Text="{Binding SHA, Converter={x:Static c:StringConverters.ToShortSHA}}" />
+                         Margin="8,0">
+                <TextBlock.Text>
+                  <MultiBinding Converter="{x:Static c:StringConverters.ToShortSHA}">
+                    <Binding Path="SHA"/>
+                    <Binding Source="{x:Static vm:Preferences.Instance}" Path="ShortSHALength"/>
+                  </MultiBinding>
+                </TextBlock.Text>
+              </TextBlock>
               <TextBlock Grid.Column="2"
                          Text="{Binding Subject, Mode=OneWay}"
                          TextTrimming="CharacterEllipsis"/>

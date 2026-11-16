@@ -368,7 +368,7 @@ namespace SourceGit.ViewModels
             {
                 Models.Branch b => b.FriendlyName,
                 Models.Tag t => t.Name,
-                Models.Commit c => c.SHA.Substring(0, 10),
+                Models.Commit c => Models.CommitSHA.Shorten(c.SHA),
                 _ => "HEAD",
             };
         }

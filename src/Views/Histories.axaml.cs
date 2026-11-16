@@ -235,7 +235,7 @@ namespace SourceGit.Views
                 foreach (var item in selected)
                 {
                     if (item is Models.Commit commit)
-                        builder.Append(commit.SHA.AsSpan(0, 10)).Append(" - ").AppendLine(commit.Subject);
+                        builder.Append(Models.CommitSHA.Shorten(commit.SHA)).Append(" - ").AppendLine(commit.Subject);
                 }
 
                 e.Handled = true;
@@ -990,7 +990,7 @@ namespace SourceGit.Views
             {
                 var builder = new StringBuilder();
                 foreach (var c in selected)
-                    builder.Append(c.SHA.AsSpan(0, 10)).Append(" - ").AppendLine(c.Subject);
+                    builder.Append(Models.CommitSHA.Shorten(c.SHA)).Append(" - ").AppendLine(c.Subject);
 
                 await this.CopyTextAsync(builder.ToString());
                 e.Handled = true;
@@ -1004,6 +1004,19 @@ namespace SourceGit.Views
                 var builder = new StringBuilder();
                 foreach (var c in selected)
                     builder.AppendLine(c.SHA);
+
+                await this.CopyTextAsync(builder.ToString());
+                e.Handled = true;
+            };
+
+            var copyShortShas = new MenuItem();
+            copyShortShas.Header = App.Text("CommitCM.CopyShortSHA");
+            copyShortShas.Icon = this.CreateMenuIcon("Icons.Hash");
+            copyShortShas.Click += async (_, e) =>
+            {
+                var builder = new StringBuilder();
+                foreach (var c in selected)
+                    builder.AppendLine(Models.CommitSHA.Shorten(c.SHA));
 
                 await this.CopyTextAsync(builder.ToString());
                 e.Handled = true;
@@ -1045,6 +1058,7 @@ namespace SourceGit.Views
             copy.Items.Add(copyInfos);
             copy.Items.Add(new MenuItem() { Header = "-" });
             copy.Items.Add(copyShas);
+            copy.Items.Add(copyShortShas);
             copy.Items.Add(copySubjects);
             copy.Items.Add(copyMessage);
             menu.Items.Add(copy);
@@ -1127,7 +1141,7 @@ namespace SourceGit.Views
             {
                 var target = commit.GetFriendlyName();
                 if (target.Length > 40)
-                    target = commit.SHA.Substring(0, 10);
+                    target = Models.CommitSHA.Shorten(commit.SHA);
 
                 if (!isHead)
                 {
@@ -1340,7 +1354,7 @@ namespace SourceGit.Views
                 {
                     var upstream = repo.Branches.Find(x => x.FullName.Equals(current.Upstream, StringComparison.Ordinal));
                     var pushRevision = new MenuItem();
-                    pushRevision.Header = App.Text("CommitCM.PushRevision", commit.SHA.Substring(0, 10), upstream.FriendlyName);
+                    pushRevision.Header = App.Text("CommitCM.PushRevision", Models.CommitSHA.Shorten(commit.SHA), upstream.FriendlyName);
                     pushRevision.Icon = this.CreateMenuIcon("Icons.Push");
                     pushRevision.Click += (_, e) =>
                     {
@@ -1455,7 +1469,7 @@ namespace SourceGit.Views
             copyInfo.Tag = OperatingSystem.IsMacOS() ? "⌘+C" : "Ctrl+C";
             copyInfo.Click += async (_, e) =>
             {
-                await this.CopyTextAsync($"{commit.SHA.AsSpan(0, 10)} - {commit.Subject}");
+                await this.CopyTextAsync($"{Models.CommitSHA.Shorten(commit.SHA)} - {commit.Subject}");
                 e.Handled = true;
             };
 
@@ -1465,6 +1479,15 @@ namespace SourceGit.Views
             copySHA.Click += async (_, e) =>
             {
                 await this.CopyTextAsync(commit.SHA);
+                e.Handled = true;
+            };
+
+            var copyShortSHA = new MenuItem();
+            copyShortSHA.Header = App.Text("CommitCM.CopyShortSHA");
+            copyShortSHA.Icon = this.CreateMenuIcon("Icons.Hash");
+            copyShortSHA.Click += async (_, e) =>
+            {
+                await this.CopyTextAsync(Models.CommitSHA.Shorten(commit.SHA));
                 e.Handled = true;
             };
 
@@ -1529,6 +1552,7 @@ namespace SourceGit.Views
             copy.Items.Add(copyInfo);
             copy.Items.Add(new MenuItem() { Header = "-" });
             copy.Items.Add(copySHA);
+            copy.Items.Add(copyShortSHA);
             copy.Items.Add(copySubject);
             copy.Items.Add(copyMessage);
             copy.Items.Add(copyAuthor);
