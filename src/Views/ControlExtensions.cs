@@ -24,6 +24,14 @@ namespace SourceGit.Views
             return null;
         }
 
+        public static Task CopyPathAsync(this Control control, string path)
+        {
+            if (OperatingSystem.IsWindows())
+                path = path.Replace('/', '\\');
+
+            return control.CopyTextAsync(path);
+        }
+
         public static async Task CopyTextAsync(this Control control, string text)
         {
             var topLevel = TopLevel.GetTopLevel(control) as Window;

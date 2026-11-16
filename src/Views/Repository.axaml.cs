@@ -209,7 +209,7 @@ namespace SourceGit.Views
                 copy.Icon = this.CreateMenuIcon("Icons.Copy");
                 copy.Click += async (_, ev) =>
                 {
-                    await this.CopyTextAsync(worktree.FullPath);
+                    await this.CopyPathAsync(worktree.FullPath);
                     ev.Handled = true;
                 };
                 menu.Items.Add(new MenuItem() { Header = "-" });

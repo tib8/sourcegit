@@ -60,7 +60,7 @@ namespace SourceGit.Views
                         builder.AppendLine(copyAbsPath ? vm.GetAbsPath(c.Path) : c.Path);
                 }
 
-                await this.CopyTextAsync(builder.ToString());
+                await this.CopyPathAsync(builder.ToString());
                 e.Handled = true;
             }
             else if (e.Key == Key.F && e.KeyModifiers == cmdKey)
@@ -132,7 +132,7 @@ namespace SourceGit.Views
             copyPath.Tag = OperatingSystem.IsMacOS() ? "⌘+C" : "Ctrl+C";
             copyPath.Click += async (_, ev) =>
             {
-                await this.CopyTextAsync(folder);
+                await this.CopyPathAsync(folder);
                 ev.Handled = true;
             };
 
@@ -142,7 +142,7 @@ namespace SourceGit.Views
             copyFullPath.Tag = OperatingSystem.IsMacOS() ? "⌘+⇧+C" : "Ctrl+Shift+C";
             copyFullPath.Click += async (_, e) =>
             {
-                await this.CopyTextAsync(fullPath);
+                await this.CopyPathAsync(fullPath);
                 e.Handled = true;
             };
 
@@ -200,7 +200,7 @@ namespace SourceGit.Views
             copyPath.Tag = OperatingSystem.IsMacOS() ? "⌘+C" : "Ctrl+C";
             copyPath.Click += async (_, ev) =>
             {
-                await this.CopyTextAsync(change.Path);
+                await this.CopyPathAsync(change.Path);
                 ev.Handled = true;
             };
 
@@ -210,7 +210,7 @@ namespace SourceGit.Views
             copyFullPath.Tag = OperatingSystem.IsMacOS() ? "⌘+⇧+C" : "Ctrl+Shift+C";
             copyFullPath.Click += async (_, e) =>
             {
-                await this.CopyTextAsync(vm.GetAbsPath(change.Path));
+                await this.CopyPathAsync(vm.GetAbsPath(change.Path));
                 e.Handled = true;
             };
 
@@ -299,7 +299,7 @@ namespace SourceGit.Views
                 foreach (var c in changes)
                     builder.AppendLine(c.Path);
 
-                await this.CopyTextAsync(builder.ToString());
+                await this.CopyPathAsync(builder.ToString());
                 ev.Handled = true;
             };
 
@@ -313,7 +313,7 @@ namespace SourceGit.Views
                 foreach (var c in changes)
                     builder.AppendLine(Native.OS.GetAbsPath(repo.FullPath, c.Path));
 
-                await this.CopyTextAsync(builder.ToString());
+                await this.CopyPathAsync(builder.ToString());
                 e.Handled = true;
             };
 

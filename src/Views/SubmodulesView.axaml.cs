@@ -289,7 +289,7 @@ namespace SourceGit.Views
                     copyRelativePath.Icon = this.CreateMenuIcon("Icons.Folder");
                     copyRelativePath.Click += async (_, ev) =>
                     {
-                        await this.CopyTextAsync(submodule.Path);
+                        await this.CopyPathAsync(submodule.Path);
                         ev.Handled = true;
                     };
 
