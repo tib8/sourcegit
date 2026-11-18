@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 using Avalonia;
@@ -39,6 +41,31 @@ namespace SourceGit.Views
             {
                 await new Alert().ShowAsync(topLevel, "Failed to copy text to clipboard: " + e.Message, true);
             }
+        }
+
+        public static MenuItem CreateCopyFileNameMenuItem(this Control control, string path)
+        {
+            return control.CreateCopyFileNameMenuItem([path]);
+        }
+
+        public static MenuItem CreateCopyFileNameMenuItem(this Control control, IEnumerable<Models.Change> changes)
+        {
+            return control.CreateCopyFileNameMenuItem(changes.Select(change => change.Path));
+        }
+
+        private static MenuItem CreateCopyFileNameMenuItem(this Control control, IEnumerable<string> paths)
+        {
+            var item = new MenuItem();
+            item.Header = App.Text("CopyFileName");
+            item.Icon = control.CreateMenuIcon("Icons.Copy");
+            item.Click += async (_, e) =>
+            {
+                // Git uses '/' as the path separator on all platforms.
+                var names = paths.Select(path => path[(path.LastIndexOf('/') + 1)..]);
+                await control.CopyTextAsync(string.Join(Environment.NewLine, names));
+                e.Handled = true;
+            };
+            return item;
         }
 
         public static Path CreateMenuIcon(this Control control, string iconKey)

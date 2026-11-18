@@ -733,6 +733,8 @@ namespace SourceGit.Views
 
                 menu.Items.Add(copy);
                 menu.Items.Add(copyFullPath);
+                if (!selection.IsSingleFolder)
+                    menu.Items.Add(this.CreateCopyFileNameMenuItem(change.Path));
             }
             else
             {
@@ -1214,6 +1216,8 @@ namespace SourceGit.Views
 
                 menu.Items.Add(copyPath);
                 menu.Items.Add(copyFullPath);
+                if (!selection.IsSingleFolder)
+                    menu.Items.Add(this.CreateCopyFileNameMenuItem(change.Path));
             }
             else
             {
