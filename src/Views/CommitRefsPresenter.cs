@@ -283,6 +283,19 @@ namespace SourceGit.Views
             InvalidateMeasure();
         }
 
+        protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+        {
+            base.OnAttachedToVisualTree(e);
+            Models.CommitGraph.PensChanged += InvalidateMeasure;
+            InvalidateMeasure();
+        }
+
+        protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+        {
+            Models.CommitGraph.PensChanged -= InvalidateMeasure;
+            base.OnDetachedFromVisualTree(e);
+        }
+
         protected override Size MeasureOverride(Size availableSize)
         {
             _items.Clear();

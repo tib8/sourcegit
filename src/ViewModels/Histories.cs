@@ -584,7 +584,7 @@ namespace SourceGit.ViewModels
                     extraHeads.Add(c.SHA);
             }
 
-            Graph = Models.CommitGraph.Generate(commits, firstParentOnly, highlighting, extraHeads, _repo.Bookmark);
+            Graph = Models.CommitGraph.Generate(commits, firstParentOnly, highlighting, extraHeads, _repo.Bookmark, _repo.BranchGraphColors);
         }
 
         private Repository _repo = null;

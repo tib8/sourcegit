@@ -107,6 +107,7 @@ namespace SourceGit.ViewModels
                     if (!succ)
                         break;
 
+                    _repo.BranchGraphColors.Forget(Target.FullName);
                     _repo.UIStates.RemoveHistoryFilter(Target.FullName, Models.FilterType.LocalBranch);
 
                     if (!DeleteUpstream || Upstream == null)
@@ -116,6 +117,7 @@ namespace SourceGit.ViewModels
                     if (!succ)
                         break;
 
+                    _repo.BranchGraphColors.Forget(Upstream.FullName);
                     _repo.UIStates.RemoveHistoryFilter(Upstream.FullName, Models.FilterType.RemoteBranch);
                 } while (false);
             }
@@ -123,7 +125,10 @@ namespace SourceGit.ViewModels
             {
                 succ = await DeleteRemoteBranchAsync(Target, log);
                 if (succ)
+                {
+                    _repo.BranchGraphColors.Forget(Target.FullName);
                     _repo.UIStates.RemoveHistoryFilter(Target.FullName, Models.FilterType.RemoteBranch);
+                }
             }
 
             log.Complete();

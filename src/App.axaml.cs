@@ -167,6 +167,15 @@ namespace SourceGit
             {
                 Models.CommitGraph.SetDefaultPens();
             }
+
+            if (app._launcher != null)
+            {
+                foreach (var page in app._launcher.Pages)
+                {
+                    if (page.Data is ViewModels.Repository repo)
+                        repo.Histories?.RefreshGraph();
+                }
+            }
         }
 
         public static void SetFonts(string defaultFont, string monospaceFont)

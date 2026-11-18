@@ -12,6 +12,8 @@ namespace SourceGit.Models
 {
     public class RepositorySettings
     {
+        internal BranchGraphColors BranchGraphColors { get; } = new();
+
         public string DefaultRemote
         {
             get;

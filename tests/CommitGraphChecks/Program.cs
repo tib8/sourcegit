@@ -12,6 +12,9 @@ internal static class Program
         CheckMergeLane();
         CheckHighlighting();
         CheckSmallPalettes();
+        CheckPersistentBranchColors();
+        CheckPersistentMergeLane();
+        CheckPaletteChanges();
         Console.WriteLine($"PASS: {_checks} commit graph checks");
     }
 
@@ -139,6 +142,78 @@ internal static class Program
                 Check(graph.Paths.Count == (colorCount == 1 ? 1 : stack.Count),
                     "a single-color palette does not create redundant path segments");
             }
+        }
+        finally
+        {
+            CommitGraph.SetDefaultPens();
+        }
+    }
+
+    private static void CheckPersistentBranchColors()
+    {
+        var colors = new BranchGraphColors();
+        var root = new Commit { SHA = "root" };
+        var main = Commit("main", root, "HEAD -> refs/heads/main");
+        var feature = Commit("feature", main, "refs/heads/feature");
+        CommitGraph.Generate([feature, main, root], false, CommitGraphHighlighting.All, [], branchColors: colors);
+        var mainColor = main.Color;
+        var featureColor = feature.Color;
+
+        main.Decorators.Clear();
+        main.ParseDecorators("HEAD -> refs/heads/new, refs/heads/main");
+        CommitGraph.Generate([main, root], false, CommitGraphHighlighting.All, [], 6, colors);
+        Check(main.Color == mainColor, "a filtered view and a new alias retain the cached tip color");
+
+        main.Decorators.Clear();
+        main.ParseDecorators("refs/heads/main");
+        var newTip = Commit("new", feature, "HEAD -> refs/heads/new");
+        CommitGraph.Generate([newTip, feature, main, root], false, CommitGraphHighlighting.All, [], branchColors: colors);
+        Check(main.Color == mainColor && feature.Color == featureColor, "a new branch and checkout preserve existing stacked colors");
+        Check(newTip.Color != featureColor && newTip.Color != mainColor, "a previously shared ref receives a distinct color when it moves");
+        var newColor = newTip.Color;
+
+        var sharedTip = Commit("shared", root, "HEAD -> refs/heads/new, refs/heads/main");
+        CommitGraph.Generate([sharedTip, root], false, CommitGraphHighlighting.All, [], 6, colors);
+        Check(sharedTip.Color == mainColor, "co-located cached refs display one deterministic branch color");
+        CommitGraph.Generate([newTip, feature, main, root], false, CommitGraphHighlighting.All, [], 6, colors);
+        Check(newTip.Color == newColor && main.Color == mainColor, "co-located refs recover their own cached colors after separating");
+    }
+
+    private static void CheckPersistentMergeLane()
+    {
+        var colors = new BranchGraphColors();
+        var root = new Commit { SHA = "root" };
+        var main = Commit("main", root);
+        var feature = Commit("feature", root, "refs/heads/feature");
+        var intermediate = Commit("intermediate", feature);
+        var merge = Commit("merge", main, "HEAD -> refs/heads/main");
+        merge.Parents.Add(intermediate.SHA);
+        List<Commit> commits = [merge, intermediate, feature, main, root];
+        var first = CommitGraph.Generate(commits, false, CommitGraphHighlighting.All, [], branchColors: colors);
+        var refreshed = CommitGraph.Generate(commits, false, CommitGraphHighlighting.All, [], branchColors: colors);
+        Check(refreshed.Dots.Select(x => x.Color).SequenceEqual(first.Dots.Select(x => x.Color)) &&
+            refreshed.Paths.Count == first.Paths.Count && intermediate.Color == feature.Color,
+            "cached branches preserve the merge lane color without a redundant split");
+    }
+
+    private static void CheckPaletteChanges()
+    {
+        var colors = new BranchGraphColors();
+        var root = new Commit { SHA = "root" };
+        var main = Commit("main", root, "HEAD -> refs/heads/main");
+        try
+        {
+            CommitGraph.SetPens([Avalonia.Media.Colors.AliceBlue, Avalonia.Media.Colors.Teal], 2);
+            CommitGraph.Generate([main, root], false, CommitGraphHighlighting.All, [], branchColors: colors);
+            Check(main.Color == 0, "the initial branch uses the original palette order");
+
+            CommitGraph.SetPens([Avalonia.Media.Colors.Teal, Avalonia.Media.Colors.AliceBlue], 2);
+            CommitGraph.Generate([main, root], false, CommitGraphHighlighting.All, [], branchColors: colors);
+            Check(main.Color == 1, "a reordered palette preserves the cached brush color");
+
+            CommitGraph.SetPens([Avalonia.Media.Colors.Teal], 2);
+            CommitGraph.Generate([main, root], false, CommitGraphHighlighting.All, [], branchColors: colors);
+            Check(main.Color == 0, "a removed palette color is replaced with an available color");
         }
         finally
         {

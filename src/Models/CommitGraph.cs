@@ -20,6 +20,7 @@ namespace SourceGit.Models
     public class CommitGraph
     {
         public static List<Pen> Pens { get; } = [];
+        internal static event Action PensChanged;
 
         public static void SetDefaultPens(double thickness = 2)
         {
@@ -36,6 +37,8 @@ namespace SourceGit.Models
             s_penCount = colors.Count;
             for (var i = 1; i < Bookmarks.Brushes.Length; i++)
                 Pens.Add(new Pen(Bookmarks.Brushes[i], thickness));
+
+            PensChanged?.Invoke();
         }
 
         public class Path(int color, bool isHighlighted)
@@ -73,7 +76,7 @@ namespace SourceGit.Models
         public List<Link> Links { get; } = [];
         public List<Dot> Dots { get; } = [];
 
-        public static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, int bookmark = 0)
+        public static CommitGraph Generate(List<Commit> commits, bool firstParentOnlyEnabled, CommitGraphHighlighting highlighting, HashSet<string> highlightExtraCommits, int bookmark = 0, BranchGraphColors branchColors = null)
         {
             const double unitWidth = 12;
             const double halfWidth = 6;
@@ -84,14 +87,58 @@ namespace SourceGit.Models
             var unsolved = new List<PathHelper>();
             var ended = new List<PathHelper>();
             var offsetY = -halfHeight;
-            var headColor = commits.Exists(x => x.IsCurrentHead) ? GetBookmarkColor(bookmark) : -1;
-            var colorPicker = new ColorPicker(headColor);
+            var branches = new Dictionary<Commit, (string Ref, int Color)>();
+            var assignedColors = new HashSet<int>();
+            var head = commits.Find(x => x.IsCurrentHead);
+            if (branchColors != null)
+            {
+                foreach (var commit in commits)
+                {
+                    var branch = FindBranch(commit, branchColors);
+                    if (branch.Ref == null)
+                        continue;
+
+                    branches.Add(commit, branch);
+                    if (branch.Color >= 0)
+                        assignedColors.Add(branch.Color);
+                }
+            }
+
+            var headColor = head != null && (!branches.TryGetValue(head, out var headBranch) || headBranch.Color < 0)
+                ? GetBookmarkColor(bookmark)
+                : -1;
+            if (assignedColors.Contains(headColor))
+                headColor = -1;
+
+            var laneColors = new Dictionary<string, int>(StringComparer.Ordinal);
+            if (assignedColors.Count > 0)
+            {
+                // A new merge lane can reach a cached branch further down its first-parent history.
+                for (var i = commits.Count - 1; i >= 0; i--)
+                {
+                    var commit = commits[i];
+                    if (branches.TryGetValue(commit, out var branch))
+                    {
+                        if (branch.Color >= 0)
+                            laneColors[commit.SHA] = branch.Color;
+                    }
+                    else if (commit.Parents.Count > 0 && laneColors.TryGetValue(commit.Parents[0], out var parentColor))
+                    {
+                        laneColors[commit.SHA] = parentColor;
+                    }
+                }
+            }
+
+            var colorPicker = new ColorPicker(headColor, assignedColors);
             var defHighlighting = highlighting == CommitGraphHighlighting.All;
 
             foreach (var commit in commits)
             {
                 PathHelper major = null;
-                var isBookmarkedHead = commit.IsCurrentHead && headColor >= 0;
+                var hasNamedBranch = branches.TryGetValue(commit, out var branch);
+                var preferredColor = commit.IsCurrentHead ? headColor : -1;
+                if (hasNamedBranch && branch.Color >= 0)
+                    preferredColor = branch.Color;
 
                 // Update current y offset
                 offsetY += unitHeight;
@@ -188,7 +235,7 @@ namespace SourceGit.Models
 
                     if (commit.Parents.Count > 0)
                     {
-                        var color = isBookmarkedHead ? headColor : colorPicker.Next();
+                        var color = preferredColor >= 0 ? preferredColor : PickLaneColor(commit.SHA, laneColors, colorPicker, unsolved);
                         major = new PathHelper(commit.Parents[0], isHighlighted, color, new Point(offsetX, offsetY));
                         unsolved.Add(major);
                         temp.Paths.Add(major.Path);
@@ -200,37 +247,33 @@ namespace SourceGit.Models
                     temp.Paths.Add(major.Path);
                 }
 
-                var hasBranch = commit.Decorators.Exists(x => x.Type is DecoratorType.CurrentBranchHead or DecoratorType.LocalBranchHead or DecoratorType.RemoteBranchHead);
-                if (major != null && hasBranch)
+                var hasBranch = hasNamedBranch || (branchColors == null && commit.Decorators.Exists(x => x.Type is DecoratorType.CurrentBranchHead or DecoratorType.LocalBranchHead or DecoratorType.RemoteBranchHead));
+                if (major != null)
                 {
-                    if (major.HasBranch && !isBookmarkedHead)
+                    if (preferredColor >= 0 || (major.HasBranch && hasBranch))
                     {
-                        // A named branch can start on an existing line without a fork.
-                        // Split its color at the branch tip, preserving the lane and highlighting.
+                        // Split at the branch tip while preserving the lane and highlighting.
                         var oldColor = major.Path.Color;
-                        var color = colorPicker.Next(oldColor);
+                        var color = preferredColor >= 0 ? preferredColor : colorPicker.Next(unsolved, oldColor);
                         if (color != oldColor)
                         {
                             major.ChangeColor(color);
                             if (commit.Parents.Count > 0)
                                 temp.Paths.Add(major.Path);
                         }
-                        colorPicker.Recycle(commit.Parents.Count > 0 ? oldColor : color);
+                        if (preferredColor < 0 && commit.Parents.Count == 0)
+                            colorPicker.Recycle(color);
+                        else if (color != oldColor)
+                            colorPicker.Recycle(oldColor);
                     }
-                    major.HasBranch = true;
-                }
-
-                if (isBookmarkedHead && major != null && major.Path.Color != headColor)
-                {
-                    colorPicker.Recycle(major.Path.Color);
-                    major.ChangeColor(headColor);
-                    if (commit.Parents.Count > 0)
-                        temp.Paths.Add(major.Path);
+                    major.HasBranch |= hasBranch;
                 }
 
                 // Calculate link position of this commit.
                 var position = new Point(major?.LastX ?? offsetX, offsetY);
-                var dotColor = major?.Path.Color ?? (isBookmarkedHead ? headColor : 0);
+                var dotColor = major?.Path.Color ?? (preferredColor >= 0 ? preferredColor : 0);
+                if (hasNamedBranch && branch.Color < 0 && Pens[dotColor].Brush is ISolidColorBrush brush)
+                    branchColors.Remember(branch.Ref, commit.SHA, brush.Color);
                 var anchor = new Dot() { Center = position, Color = dotColor, IsHighlighted = isHighlighted };
                 if (commit.IsCurrentHead)
                     anchor.Type = DotType.Head;
@@ -273,7 +316,8 @@ namespace SourceGit.Models
                             offsetX += unitWidth;
 
                             // Create new curve for parent commit that not includes before
-                            var l = new PathHelper(parentHash, isHighlighted, colorPicker.Next(), position, new Point(offsetX, position.Y + halfHeight));
+                            var color = PickLaneColor(parentHash, laneColors, colorPicker, unsolved);
+                            var l = new PathHelper(parentHash, isHighlighted, color, position, new Point(offsetX, position.Y + halfHeight));
                             unsolved.Add(l);
                             temp.Paths.Add(l.Path);
                         }
@@ -315,11 +359,63 @@ namespace SourceGit.Models
             return s_penCount + bookmark - 1;
         }
 
-        private class ColorPicker(int reservedColor)
+        private static (string Ref, int Color) FindBranch(Commit commit, BranchGraphColors colors)
         {
-            public int Next(int exclude = -1)
+            string firstRef = null;
+            string cachedRef = null;
+            var cachedColor = -1;
+            foreach (var decorator in commit.Decorators)
+            {
+                var reference = decorator.Type switch
+                {
+                    DecoratorType.CurrentBranchHead or DecoratorType.LocalBranchHead => $"refs/heads/{decorator.Name}",
+                    DecoratorType.RemoteBranchHead => $"refs/remotes/{decorator.Name}",
+                    _ => null,
+                };
+                if (reference == null)
+                    continue;
+
+                firstRef ??= reference;
+                if ((cachedRef == null || string.CompareOrdinal(reference, cachedRef) < 0) && colors.TryGetColor(reference, out var color))
+                {
+                    var index = Pens.FindIndex(pen => pen.Brush is ISolidColorBrush brush && brush.Color == color);
+                    if (index >= 0)
+                    {
+                        cachedRef = reference;
+                        cachedColor = index;
+                    }
+                }
+            }
+            return (cachedRef ?? firstRef, cachedColor);
+        }
+
+        private static int PickLaneColor(string sha, Dictionary<string, int> laneColors, ColorPicker picker, List<PathHelper> active)
+        {
+            if (laneColors.TryGetValue(sha, out var color) && !active.Exists(lane => lane.Path.Color == color))
+                return color;
+
+            return picker.Next(active);
+        }
+
+        private class ColorPicker(int reservedColor, HashSet<int> assignedColors)
+        {
+            public int Next(List<PathHelper> active, int exclude = -1)
             {
                 var reservedCount = s_penCount > 1 && reservedColor >= 0 && reservedColor < s_penCount ? 1 : 0;
+                var avoidPrevious = s_penCount - reservedCount > 1;
+                var bestScore = 0;
+                if (assignedColors.Count > 0)
+                {
+                    for (var i = 0; i < s_penCount; i++)
+                    {
+                        if ((reservedCount > 0 && i == reservedColor) || (avoidPrevious && i == exclude))
+                            continue;
+
+                        bestScore = Math.Max(bestScore, Score(i, active));
+                        if (bestScore == 3)
+                            break;
+                    }
+                }
                 int color;
                 do
                 {
@@ -331,7 +427,7 @@ namespace SourceGit.Models
 
                     color = _colorsQueue.Dequeue();
                 }
-                while ((reservedCount > 0 && color == reservedColor) || (s_penCount - reservedCount > 1 && color == exclude));
+                while ((reservedCount > 0 && color == reservedColor) || (avoidPrevious && color == exclude) || (bestScore > 0 && Score(color, active) < bestScore));
 
                 return color;
             }
@@ -342,7 +438,14 @@ namespace SourceGit.Models
                     _colorsQueue.Enqueue(idx);
             }
 
-            private Queue<int> _colorsQueue = new Queue<int>();
+            private int Score(int color, List<PathHelper> active)
+            {
+                // Prefer a free lane color, then one without a visible cached branch.
+                var score = active.Exists(lane => lane.Path.Color == color) ? 0 : 2;
+                return assignedColors.Contains(color) ? score : score + 1;
+            }
+
+            private readonly Queue<int> _colorsQueue = new();
         }
 
         private class PathHelper

@@ -11,6 +11,8 @@ namespace SourceGit.Commands
         private const string PREFIX_DETACHED_AT = "(HEAD detached at";
         private const string PREFIX_DETACHED_FROM = "(HEAD detached from";
 
+        public bool IsSuccess { get; private set; }
+
         public QueryBranches(string repo)
         {
             WorkingDirectory = repo;
@@ -22,7 +24,8 @@ namespace SourceGit.Commands
         {
             var branches = new List<Models.Branch>();
             var rs = await ReadToEndAsync().ConfigureAwait(false);
-            if (!rs.IsSuccess)
+            IsSuccess = rs.IsSuccess;
+            if (!IsSuccess)
                 return branches;
 
             var lines = rs.StdOut.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
