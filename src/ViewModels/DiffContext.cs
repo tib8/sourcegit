@@ -13,6 +13,8 @@ namespace SourceGit.ViewModels
             get;
         }
 
+        public string FilePath => _option.Path;
+
         public int OldMode
         {
             get => _oldMode;

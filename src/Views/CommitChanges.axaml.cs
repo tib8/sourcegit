@@ -244,6 +244,7 @@ namespace SourceGit.Views
             menu.Items.Add(new MenuItem { Header = "-" });
             menu.Items.Add(copyPath);
             menu.Items.Add(copyFullPath);
+            menu.Items.Add(this.CreateCopyFileNameMenuItem(change.Path));
 
             return menu;
         }
@@ -344,6 +345,7 @@ namespace SourceGit.Views
 
             menu.Items.Add(copyPath);
             menu.Items.Add(copyFullPath);
+            menu.Items.Add(this.CreateCopyFileNameMenuItem(changes));
             return menu;
         }
     }

@@ -780,6 +780,7 @@ namespace SourceGit.Views
 
             menu.Items.Add(copyPath);
             menu.Items.Add(copyFullPath);
+            menu.Items.Add(this.CreateCopyFileNameMenuItem(file.Path));
             return menu;
         }
 

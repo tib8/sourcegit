@@ -444,6 +444,7 @@
   <x:String x:Key="Text.CopyWithText" xml:space="preserve">Copy: {0}</x:String>
   <x:String x:Key="Text.CopyAllText" xml:space="preserve">Copy All Text</x:String>
   <x:String x:Key="Text.CopyAsPatch" xml:space="preserve">Copy as Patch</x:String>
+  <x:String x:Key="Text.CopyFileName" xml:space="preserve">Copy File Name</x:String>
   <x:String x:Key="Text.CopyFullPath" xml:space="preserve">Copy Full Path</x:String>
   <x:String x:Key="Text.CopyPath" xml:space="preserve">Copy Path</x:String>
   <x:String x:Key="Text.CreateBranch" xml:space="preserve">Create Branch...</x:String>

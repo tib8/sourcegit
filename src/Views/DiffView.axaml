@@ -48,12 +48,22 @@
           </ContentControl>
 
           <!-- Title -->
-          <TextBlock Grid.Column="3"
-                     Margin="4,0,0,0"
-                     Text="{Binding Title}"
+          <Grid Grid.Column="3" ColumnDefinitions="Auto,*" Margin="4,0,0,0">
+            <v:CopyButton Grid.Column="0" Width="24"
+                          CopyText="{Binding FilePath}"
+                          AutomationProperties.Name="{DynamicResource Text.CopyPath}"
+                          ToolTip.Tip="{DynamicResource Text.CopyPath}"/>
+            <TextBox Grid.Column="1"
+                     Classes="no_background no_border"
+                     Text="{Binding Title, Mode=OneWay}"
                      ToolTip.Tip="{Binding Title}"
-                     FontSize="11"
-                     TextTrimming="CharacterEllipsis"/>
+                     IsReadOnly="True"
+                     BorderThickness="0"
+                     MinHeight="0"
+                     Padding="0"
+                     VerticalContentAlignment="Center"
+                     FontSize="11"/>
+          </Grid>
 
           <!-- Toolbar Buttons -->
           <StackPanel Grid.Column="4" Margin="8,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">

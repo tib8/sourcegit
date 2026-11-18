@@ -139,6 +139,8 @@ namespace SourceGit.Views
                     menu.Items.Add(new MenuItem() { Header = "-" });
                     menu.Items.Add(copyPath);
                     menu.Items.Add(copyFullPath);
+                    if (!selectedSingleFolder)
+                        menu.Items.Add(this.CreateCopyFileNameMenuItem(change.Path));
                 }
                 else
                 {
@@ -229,6 +231,8 @@ namespace SourceGit.Views
                     menu.Items.Add(new MenuItem() { Header = "-" });
                     menu.Items.Add(copyPath);
                     menu.Items.Add(copyFullPath);
+                    if (!selectedSingleFolder)
+                        menu.Items.Add(this.CreateCopyFileNameMenuItem(selection.Changes));
                 }
 
                 menu.Open(sender as Control);
