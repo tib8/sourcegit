@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Reflection;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Data;
+using Avalonia.Threading;
 using SourceGit;
 using SourceGit.Models;
 using SourceGit.ViewModels;
@@ -215,36 +217,143 @@ internal static class Program
                 "the working-directory branch badge matches the repository bookmark");
             var original = histories.Graph;
             node.Bookmark = 7;
-            Check(!ReferenceEquals(original, histories.Graph) && BrushColor(head.Color) == ((ISolidColorBrush)Bookmarks.Get(7)).Color,
-                "editing a repository bookmark immediately regenerates its open graph");
-            Check(((ISolidColorBrush)histories.WorkingDirectory.BranchBrush).Color == ((ISolidColorBrush)Bookmarks.Get(7)).Color,
-                "editing the bookmark immediately refreshes the working-directory badge color");
-            Check(!label.IsMeasureValid && label.GraphColor == head.Color,
-                "editing a bookmark immediately invalidates the visible branch badge color");
-            label.Measure(new Size(200, 26));
+            Check(!ReferenceEquals(original, histories.Graph) && BrushColor(head.Color) == ((ISolidColorBrush)Bookmarks.Get(6)).Color,
+                "editing a repository bookmark regenerates the graph and preserves a cached branch color");
+            Check(((ISolidColorBrush)histories.WorkingDirectory.BranchBrush).Color == BrushColor(head.Color),
+                "editing the bookmark preserves the working-directory badge's cached branch color");
+            Check(label.GraphColor == head.Color, "the visible badge uses the cached branch color");
             var items = (List<SourceGit.Views.CommitRefsPresenter.RenderItem>)typeof(SourceGit.Views.CommitRefsPresenter)
                 .GetField("_items", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(label);
-            Check(((ISolidColorBrush)items[0].Brush).Color == ((ISolidColorBrush)Bookmarks.Get(7)).Color,
-                "the refreshed branch badge uses the new bookmark color");
+            Check(((ISolidColorBrush)items[0].Brush).Color == ((ISolidColorBrush)Bookmarks.Get(6)).Color,
+                "a bookmark edit leaves the visible branch badge color intact");
             node.Bookmark = 0;
-            Check(head.Color == 0, "clearing the bookmark restores the default graph color");
+            Check(BrushColor(head.Color) == ((ISolidColorBrush)Bookmarks.Get(6)).Color,
+                "clearing the bookmark preserves the cached color");
             node.IsUnmanaged = true;
             Preferences.Instance.RepositoryNodes.Remove(node);
             node.Bookmark = 3;
-            Check(repo.Bookmark == 3 && BrushColor(head.Color) == ((ISolidColorBrush)Bookmarks.Get(3)).Color,
-                "unmanaged tabs use their own bookmark even without a saved repository node");
+            var detached = Commit("detached", root, "HEAD");
+            histories.Commits = [detached, head, root];
+            Check(repo.Bookmark == 3 && BrushColor(detached.Color) == ((ISolidColorBrush)Bookmarks.Get(3)).Color,
+                "unmanaged tabs use their own bookmark for an unassigned HEAD");
+
+            var reopened = new Histories(new Repository(false, fixture, Path.Combine(fixture, ".git")));
+            reopened.Commits = [head, root];
+            Check(BrushColor(head.Color) == ((ISolidColorBrush)Bookmarks.Get(6)).Color,
+                "a new repository view reuses that repository's runtime branch assignments");
+
+            var independent = new Histories(new Repository(false, Path.Combine(fixture, "other"), Path.Combine(fixture, "other", ".git")));
+            var independentHead = Commit("independent", root, "HEAD -> refs/heads/main");
+            independent.Commits = [independentHead, root];
+            Check(independentHead.Color == 0, "the same branch name in a different repository receives its own color");
+
+            CheckRefChanges(fixture, launcher);
         }
         finally
         {
             var root = Path.GetFullPath(Path.GetTempPath());
             if (!Path.GetFullPath(fixture).StartsWith(root, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Fixture must stay inside the temporary directory");
+            foreach (var file in Directory.EnumerateFiles(fixture, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
             Directory.Delete(fixture, true);
         }
     }
 
     private static CommitGraph Generate(List<Commit> commits, bool firstParentOnly, CommitGraphHighlighting highlighting, HashSet<string> selected, int bookmark = 0) =>
         CommitGraph.Generate(commits, firstParentOnly, highlighting, selected, reserveHeadLane: false, bookmark: bookmark);
+
+    private static void CheckRefChanges(string fixture, Launcher launcher)
+    {
+        var path = Path.Combine(fixture, "refs-fixture");
+        Directory.CreateDirectory(path);
+        var git = SourceGit.Native.OS.FindGitExecutable();
+        Check(!string.IsNullOrEmpty(git), "Git is available for the ref lifecycle checks");
+        SourceGit.Native.OS.GitExecutable = git;
+        RunGit(path, "init", "-b", "main");
+        RunGit(path, "commit", "--allow-empty", "-m", "main");
+        RunGit(path, "switch", "-c", "feature");
+        RunGit(path, "commit", "--allow-empty", "-m", "feature");
+
+        var repo = new Repository(false, path, Path.Combine(path, ".git"));
+        var histories = new Histories(repo);
+        typeof(Repository).GetField("_histories", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(repo, histories);
+        using var refreshes = new RefreshCoordinator(ex => throw new InvalidOperationException("Branch refresh failed", ex));
+        typeof(Repository).GetField("_refreshes", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(repo, refreshes);
+        var node = new RepositoryNode { Id = repo.FullPath, Name = "Ref Lifecycle", IsRepository = true, Bookmark = 6 };
+        launcher.Pages.Add(new LauncherPage(node, repo));
+        RefreshBranches(repo, () => repo.Branches.Any(x => x.Name == "feature"));
+
+        var root = new Commit { SHA = RunGit(path, "rev-parse", "main") };
+        var initial = Commit(RunGit(path, "rev-parse", "HEAD"), root, "HEAD -> refs/heads/feature");
+        histories.Commits = [initial, root];
+        var initialColor = BrushColor(initial.Color);
+        Check(initialColor == ((ISolidColorBrush)Bookmarks.Get(6)).Color, "a newly visible branch can inherit the bookmark");
+        node.Bookmark = 0;
+
+        var worktree = Path.Combine(fixture, "linked-worktree");
+        RunGit(path, "worktree", "add", "--detach", worktree, "HEAD");
+        var worktreeGitDir = Path.Combine(path, ".git", "worktrees", Path.GetFileName(worktree));
+        var linked = new Histories(new Repository(false, worktree, worktreeGitDir));
+        var linkedTip = Commit(initial.SHA, root, "refs/heads/feature");
+        linked.Commits = [linkedTip, root];
+        Check(BrushColor(linkedTip.Color) == initialColor, "linked worktrees share the common repository's runtime branch colors");
+
+        RunGit(path, "branch", "-m", "feature", "intermediate");
+        RunGit(path, "branch", "-m", "intermediate", "renamed");
+        RunGit(path, "commit", "--allow-empty", "-m", "advance renamed branch");
+        RefreshBranches(repo, () => repo.Branches.Any(x => x.Name == "renamed"));
+        var renamed = Commit(RunGit(path, "rev-parse", "HEAD"), root, "HEAD -> refs/heads/renamed");
+        histories.Commits = [renamed, root];
+        Check(BrushColor(renamed.Color) == initialColor, "chained external renames preserve the cached color even after a commit");
+
+        RunGit(path, "switch", "main");
+        RunGit(path, "branch", "-D", "renamed");
+        RefreshBranches(repo, () => repo.Branches.All(x => x.Name != "renamed"));
+        histories.RefreshGraph();
+        RunGit(path, "switch", "-c", "renamed");
+        RunGit(path, "commit", "--allow-empty", "-m", "new branch with a reused name");
+        RefreshBranches(repo, () => repo.Branches.Any(x => x.Name == "renamed"));
+        node.Bookmark = 7;
+        var recreated = Commit(RunGit(path, "rev-parse", "HEAD"), root, "HEAD -> refs/heads/renamed");
+        histories.Commits = [recreated, root];
+        Check(BrushColor(recreated.Color) == ((ISolidColorBrush)Bookmarks.Get(7)).Color,
+            "a recreated ref gets a fresh color after deletion and stale history rendering");
+    }
+
+    private static void RefreshBranches(Repository repo, Func<bool> done)
+    {
+        repo.RefreshBranches();
+        var timer = Stopwatch.StartNew();
+        while (!done() && timer.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(10);
+        }
+        Check(done(), "the repository rereads its refs");
+    }
+
+    private static string RunGit(string path, params string[] args)
+    {
+        var start = new ProcessStartInfo(SourceGit.Native.OS.GitExecutable)
+        {
+            WorkingDirectory = path,
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+        };
+        foreach (var arg in new[] { "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false" })
+            start.ArgumentList.Add(arg);
+        foreach (var arg in args)
+            start.ArgumentList.Add(arg);
+        using var process = Process.Start(start);
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(error);
+        return output.TrimEnd();
+    }
 
     private static Color BrushColor(int color) => ((ISolidColorBrush)CommitGraph.Pens[color].Brush).Color;
 

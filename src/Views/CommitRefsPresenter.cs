@@ -347,6 +347,19 @@ namespace SourceGit.Views
             InvalidateMeasure();
         }
 
+        protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+        {
+            base.OnAttachedToVisualTree(e);
+            Models.CommitGraph.PensChanged += InvalidateMeasure;
+            InvalidateMeasure();
+        }
+
+        protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+        {
+            Models.CommitGraph.PensChanged -= InvalidateMeasure;
+            base.OnDetachedFromVisualTree(e);
+        }
+
         protected override Size MeasureOverride(Size availableSize)
         {
             _items.Clear();
@@ -433,7 +446,11 @@ namespace SourceGit.Views
             var typefaceHead = new Typeface(FontFamily, FontStyle.Normal, FontWeight.Bold);
             var typefaceRemote = new Typeface(FontFamily, FontStyle.Italic, FontWeight.Bold);
             var fg = Foreground;
-            var normalBG = UseGraphColor && commit != null ? Models.CommitGraph.Pens[GraphColor >= 0 ? GraphColor : commit.Color].Brush : Brushes.Gray;
+            var color = GraphColor;
+            if (color < 0 && commit != null)
+                color = commit.Color;
+            var pens = Models.CommitGraph.Pens;
+            var normalBG = UseGraphColor && commit != null && color >= 0 && color < pens.Count ? pens[color].Brush : Brushes.Gray;
             if (ShowBranchSummary && BranchSummaryBrushOverride != null)
                 normalBG = BranchSummaryBrushOverride;
             var labelSize = FontSize;

@@ -117,7 +117,10 @@ namespace SourceGit.ViewModels
             {
                 var succ = await new Commands.Remote(_repo.FullPath).RenameAsync(_remote.Name, _name);
                 if (succ)
+                {
+                    _repo.BranchGraphColors.RenameRemote(_remote.Name, _name);
                     _remote.Name = _name;
+                }
             }
 
             if (_remote.URL != _url)

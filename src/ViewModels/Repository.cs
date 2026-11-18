@@ -30,6 +30,7 @@ namespace SourceGit.ViewModels
         }
 
         public int Bookmark => GetOwnerPage()?.Node.Bookmark ?? Preferences.Instance.FindNode(FullPath)?.Bookmark ?? 0;
+        internal Models.BranchGraphColors BranchGraphColors => _settings.BranchGraphColors;
 
         public Models.RepositorySettings Settings
         {
@@ -878,6 +879,7 @@ namespace SourceGit.ViewModels
             _watcher?.MarkBranchUpdated();
 
             var newFullName = $"refs/heads/{newName}";
+            BranchGraphColors.Rename(b.FullName, newFullName);
             _uiStates.RenameBranchFilter(b.FullName, newFullName);
 
             var renamed = new Models.Branch
@@ -1188,8 +1190,28 @@ namespace SourceGit.ViewModels
 
         private async Task RefreshBranchesAsync(Models.RefreshCoordinator.Context context)
         {
-            var branches = await new Commands.QueryBranches(FullPath).WithCancellation(context.CancellationToken).GetResultAsync().ConfigureAwait(false);
-            context.CancellationToken.ThrowIfCancellationRequested();
+            var token = context.CancellationToken;
+            var previousRefs = BranchGraphColors.RefTips;
+            var query = new Commands.QueryBranches(FullPath).WithCancellation(token);
+            var branches = await query.GetResultAsync().ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+
+            Dictionary<string, string> currentRefs = null;
+            var renames = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (query.IsSuccess)
+            {
+                currentRefs = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var branch in branches)
+                {
+                    if (!branch.IsDetachedHead)
+                        currentRefs[branch.FullName] = branch.Head;
+                }
+
+                if (previousRefs != null)
+                    await ReadBranchRenamesAsync(previousRefs, currentRefs, renames, token).ConfigureAwait(false);
+            }
+
+            token.ThrowIfCancellationRequested();
             var remotes = await new Commands.QueryRemotes(FullPath).GetResultAsync().ConfigureAwait(false);
             var builder = BuildBranchTree(branches, remotes);
 
@@ -1197,6 +1219,11 @@ namespace SourceGit.ViewModels
             {
                 if (!context.IsCurrent)
                     return;
+                if (currentRefs != null && !BranchGraphColors.UpdateRefs(previousRefs, currentRefs, renames))
+                {
+                    RefreshBranches();
+                    return;
+                }
 
                 Remotes = remotes;
                 Branches = branches;
@@ -1219,7 +1246,35 @@ namespace SourceGit.ViewModels
 
                 var hasPendingPullOrPush = CurrentBranch?.IsTrackStatusVisible ?? false;
                 GetOwnerPage()?.ChangeDirtyState(Models.DirtyState.HasPendingPullOrPush, !hasPendingPullOrPush);
+                if (!ReferenceEquals(previousRefs, BranchGraphColors.RefTips) && _histories?.Graph != null)
+                    _histories.RefreshGraph();
             }, DispatcherPriority.Background);
+        }
+
+        private async Task ReadBranchRenamesAsync(IReadOnlyDictionary<string, string> previous, Dictionary<string, string> current, Dictionary<string, string> renames, CancellationToken token)
+        {
+            var removed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var reference in previous.Keys)
+            {
+                if (reference.StartsWith("refs/heads/", StringComparison.Ordinal) && !current.ContainsKey(reference))
+                    removed.Add(reference);
+            }
+
+            if (removed.Count == 0)
+                return;
+
+            foreach (var reference in current.Keys)
+            {
+                if (token.IsCancellationRequested || removed.Count == 0)
+                    return;
+
+                if (!reference.StartsWith("refs/heads/", StringComparison.Ordinal) || previous.ContainsKey(reference))
+                    continue;
+
+                var source = await new Commands.QueryBranchRename(FullPath, reference).WithCancellation(token).GetSourceAsync(removed).ConfigureAwait(false);
+                if (source != null && removed.Remove(source))
+                    renames.Add(reference, source);
+            }
         }
 
         public void RefreshWorktrees()

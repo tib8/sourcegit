@@ -988,13 +988,14 @@ namespace SourceGit.ViewModels
                     extraHeads.Add(c.SHA);
             }
 
+            var reserveHeadLane = Preferences.Instance.WorkingDirectoryHeadMode != 0;
+            var branchColors = _repo.BranchGraphColors;
             // Small histories remain immediate (including empty/working-directory rows).
             // Large histories must not monopolize the dispatcher during a refresh.
             if ((IsQuickSearchFilterActive ? _commits.Count : commits.Count) > 256)
             {
                 var snapshot = new Models.CommitGraph.Snapshot(_commits, commits, IsQuickSearchFilterActive,
-                    firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible,
-                    Preferences.Instance.WorkingDirectoryHeadMode != 0, _repo.Bookmark);
+                    firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, reserveHeadLane, _repo.Bookmark, branchColors);
                 var cancellation = new CancellationTokenSource();
                 _graphCancellation = cancellation;
                 // The old graph may describe a different set/order of rows.
@@ -1004,8 +1005,8 @@ namespace SourceGit.ViewModels
             }
 
             var graph = IsQuickSearchFilterActive ?
-                Models.CommitGraph.GenerateFiltered(_commits, commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, Preferences.Instance.WorkingDirectoryHeadMode != 0, _repo.Bookmark) :
-                Models.CommitGraph.Generate(commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, Preferences.Instance.WorkingDirectoryHeadMode != 0, _repo.Bookmark);
+                Models.CommitGraph.GenerateFiltered(_commits, commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, reserveHeadLane, _repo.Bookmark, branchColors: branchColors) :
+                Models.CommitGraph.Generate(commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, reserveHeadLane, _repo.Bookmark, branchColors: branchColors);
             ApplyGraph(graph);
         }
 
@@ -1018,7 +1019,7 @@ namespace SourceGit.ViewModels
                 {
                     if (cancellation.IsCancellationRequested)
                         return;
-                    if (!snapshot.IsPaletteCurrent)
+                    if (!snapshot.IsCurrent)
                     {
                         GenerateGraph(DisplayedCommits);
                         return;

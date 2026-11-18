@@ -12,6 +12,8 @@ namespace SourceGit.Models
 {
     public class RepositorySettings
     {
+        internal BranchGraphColors BranchGraphColors { get; } = new();
+
         public Dictionary<string, AzureDevOps.PullRequestDefaults> AzureDevOpsPullRequests { get; set; } = [];
         public Dictionary<string, AzureDevOps.PendingCreation> AzureDevOpsPendingRequests { get; set; } = [];
 
