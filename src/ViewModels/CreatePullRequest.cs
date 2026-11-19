@@ -18,6 +18,7 @@ namespace SourceGit.ViewModels
         public string Id { get; init; }
         public string Name { get; init; }
         public string Detail { get; init; }
+        public bool HasDetail => !string.IsNullOrWhiteSpace(Detail) && !string.Equals(Name?.Trim(), Detail.Trim(), StringComparison.OrdinalIgnoreCase);
         public bool IsAvailable { get; init; } = true;
         public bool IsRequired { get => _required; set { if (SetProperty(ref _required, value)) _changed?.Invoke(); } }
         private readonly Action _changed;
@@ -29,6 +30,10 @@ namespace SourceGit.ViewModels
         public ObservableCollection<GitRef> Branches { get; } = [];
         public ObservableCollection<Identity> SearchResults { get; } = [];
         public ObservableCollection<PullRequestReviewer> Reviewers { get; } = [];
+        public string ReviewerSummary => App.Text("CreatePR.SelectedReviewers", Reviewers.Count);
+        public bool NeedsPush { get => _needsPush; private set { SetProperty(ref _needsPush, value); NotifyState(); } }
+        public bool ShowPushDestination => NeedsPush && !HasExistingPullRequest && !HasPending;
+        public string PushDestination => App.Text("CreatePR.PushDestination", _remote.Name + "/" + SourceBranch);
         public string ReviewerSearchStatus { get => _reviewerSearchStatus; private set => SetProperty(ref _reviewerSearchStatus, value); }
         public bool IsSearchingReviewers { get => _searchingReviewers; private set => SetProperty(ref _searchingReviewers, value); }
         public bool HasReviewerSearchError { get => _reviewerSearchError; private set => SetProperty(ref _reviewerSearchError, value); }
@@ -87,7 +92,8 @@ namespace SourceGit.ViewModels
         public bool HasUnknown => _store?.Pending is { PullRequestId: 0 };
         public bool RecoveryAcknowledged { get => _recoveryAcknowledged; set { SetProperty(ref _recoveryAcknowledged, value); NotifyState(); } }
         public bool CanClearRecovery => !IsBusy && HasPending && RecoveryAcknowledged;
-        public string PrimaryLabel => HasPending ? App.Text(_store.Pending.PullRequestId > 0 ? "CreatePR.RetrySetup" : "CreatePR.CheckCreation") : App.Text(IsDraft ? "CreatePR.CreateDraft" : "CreatePR.Create");
+        public string PrimaryLabel => HasPending ? App.Text(_store.Pending.PullRequestId > 0 ? "CreatePR.RetrySetup" : "CreatePR.CheckCreation") :
+            App.Text(NeedsPush ? IsDraft ? "CreatePR.PushCreateDraft" : "CreatePR.PushCreate" : IsDraft ? "CreatePR.CreateDraft" : "CreatePR.Create");
         public bool CanCreate => IsConnected && !HasActivity && !IsFinished && (HasPending || (!HasExistingPullRequest && !_commitLoadFailed && Target != null && !string.IsNullOrWhiteSpace(Title) && Reviewers.All(x => x.IsAvailable)));
         public bool AutoCompleteAvailable => !IsDraft;
         public bool IsSquash => MergeStrategy == 0;
@@ -142,11 +148,14 @@ namespace SourceGit.ViewModels
         public CreatePullRequest(Repository repository, Models.Remote remote, Models.Branch branch, Models.Branch localBranch = null,
             HttpClient http = null, Func<ConnectionSettings, string, Task<IAuthentication>> authenticationFactory = null,
             Func<string, string, Task<PersonalAccessTokenAuthentication>> personalAccessTokenFactory = null,
-            Func<CancellationToken, Task<Commands.PullRequestBranchOrigin>> branchOriginReader = null)
+            Func<CancellationToken, Task<Commands.PullRequestBranchOrigin>> branchOriginReader = null,
+            Func<string, string, string, CancellationToken, Task<List<string>>> localCommitReader = null,
+            Func<string, CancellationToken, Task<bool>> pushSource = null)
         {
             _repo = repository;
             _remote = remote;
-            _localBranch = localBranch;
+            _localBranch = localBranch ?? (branch.IsLocal ? branch : null);
+            _needsPush = _localBranch != null && (branch.IsLocal || string.IsNullOrEmpty(branch.Head) || !string.Equals(branch.Head, _localBranch.Head, StringComparison.OrdinalIgnoreCase));
             SourceBranch = branch.Name;
             _sourceRef = "refs/heads/" + branch.Name;
             _title = string.Empty;
@@ -164,6 +173,20 @@ namespace SourceGit.ViewModels
             _branchOriginReader = branchOriginReader ?? (token => _localBranch == null
                 ? Task.FromResult<Commands.PullRequestBranchOrigin>(null)
                 : new Commands.ReadPullRequestBranchOrigin(_repo.FullPath, _localBranch.FullName).GetOriginAsync(token));
+            var git = new Commands.PullRequestGit(_repo.FullPath, remote);
+            _localCommitReader = localCommitReader ?? git.ReadMessagesAsync;
+            _pushSource = pushSource ?? (async (tip, token) =>
+            {
+                using var watcherLock = _repo.LockWatcher();
+                var log = _repo.CreateLog("Push " + _remote.Name + "/" + SourceBranch);
+                try
+                { return await git.PushAsync(tip, _sourceRef, _repo.Submodules.Count > 0, log, token); }
+                finally
+                {
+                    log.Complete();
+                    _repo.RefreshBranches();
+                }
+            });
             Status = App.Text("CreatePR.ConnectPrompt");
         }
 
@@ -414,16 +437,22 @@ namespace SourceGit.ViewModels
                     return;
                 }
                 Status = App.Text("CreatePR.LoadingCommits");
-                var sourceTip = await _service.ValidateSourceAsync(_sourceRef, cancellation.Token);
+                var source = await _client.GetRefAsync(_sourceRef, cancellation.Token);
+                var localTip = await ReadLocalTipAsync(cancellation.Token);
+                var sourceTip = localTip ?? source?.ObjectId ?? throw new ServiceException("Unpublished");
+                NeedsPush = localTip != null && !string.Equals(source?.ObjectId, localTip, StringComparison.OrdinalIgnoreCase);
                 var targetRef = await _client.GetRefAsync(target.Name, cancellation.Token) ?? throw new ServiceException("InvalidTarget");
-                var commits = await _client.GetCommitsAsync(sourceTip, targetRef.ObjectId, cancellation.Token);
+                var comments = NeedsPush
+                    ? await _localCommitReader(sourceTip, target.Name, targetRef.ObjectId, cancellation.Token)
+                    : (await _client.GetCommitsAsync(sourceTip, targetRef.ObjectId, cancellation.Token)).Select(x => x.Comment).ToList();
                 cancellation.Token.ThrowIfCancellationRequested();
-                var messages = commits.Select(x => (x.Comment ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Trim()).ToArray();
+                _previewSourceTip = sourceTip;
+                var messages = comments.Select(x => (x ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Trim()).ToArray();
                 var first = messages.FirstOrDefault() ?? string.Empty;
                 var newline = first.IndexOf('\n');
                 var title = newline < 0 ? first : first[..newline];
                 var description = messages.Length > 1
-                    ? string.Join("\n\n", messages.Select(x => "- " + x.Replace("\n", "\n  ")))
+                    ? string.Join("\n", messages.Select(x => "- " + x.Replace("\n", "\n  ")))
                     : newline < 0 ? string.Empty : first[(newline + 1)..].Trim();
                 ApplyCommitText(title, description);
                 Status = string.Empty;
@@ -532,6 +561,40 @@ namespace SourceGit.ViewModels
             {
                 if (Target == null || string.IsNullOrWhiteSpace(Title) || Reviewers.Any(x => !x.IsAvailable))
                     throw new ServiceException("InvalidTarget");
+                var duplicates = await _client.FindPullRequestsAsync(_sourceRef, Target.Name, true, _lifetime.Token);
+                if (duplicates.Count > 0)
+                {
+                    ShowExistingPullRequest(duplicates[0]);
+                    return;
+                }
+                if (_localBranch != null)
+                {
+                    var localTip = await ReadLocalTipAsync(_lifetime.Token);
+                    var source = await _client.GetRefAsync(_sourceRef, _lifetime.Token);
+                    var pushWasShown = NeedsPush;
+                    NeedsPush = !string.Equals(source?.ObjectId, localTip, StringComparison.OrdinalIgnoreCase);
+                    if (!string.Equals(localTip, _previewSourceTip, StringComparison.OrdinalIgnoreCase) || (NeedsPush && !pushWasShown))
+                    {
+                        _commitLoadFailed = true;
+                        throw new ServiceException("SourcePreviewChanged");
+                    }
+                    if (NeedsPush)
+                    {
+                        Status = App.Text("CreatePR.Pushing", _remote.Name + "/" + SourceBranch);
+                        if (!await _pushSource(localTip, _lifetime.Token))
+                            throw new ServiceException("PushFailed");
+                        _lifetime.Token.ThrowIfCancellationRequested();
+                        Status = App.Text("CreatePR.VerifyingPush");
+                        var publishedTip = await _service.ValidateSourceAsync(_sourceRef, _lifetime.Token);
+                        if (!string.Equals(publishedTip, localTip, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _commitLoadFailed = true;
+                            throw new ServiceException("SourcePreviewChanged");
+                        }
+                        NeedsPush = false;
+                    }
+                }
+                Status = App.Text("CreatePR.Creating");
                 _result = await _service.CreateAsync(new CreateRequest
                 {
                     SourceRefName = _sourceRef,
@@ -718,6 +781,8 @@ namespace SourceGit.ViewModels
             OnPropertyChanged(nameof(CanRetryLoading));
             OnPropertyChanged(nameof(HasActivity));
             OnPropertyChanged(nameof(CompletionSummary));
+            OnPropertyChanged(nameof(ReviewerSummary));
+            OnPropertyChanged(nameof(ShowPushDestination));
         }
 
         public void Dispose()
@@ -747,6 +812,8 @@ namespace SourceGit.ViewModels
         private readonly Func<ConnectionSettings, string, Task<IAuthentication>> _authenticationFactory;
         private readonly Func<string, string, Task<PersonalAccessTokenAuthentication>> _personalAccessTokenFactory;
         private readonly Func<CancellationToken, Task<Commands.PullRequestBranchOrigin>> _branchOriginReader;
+        private readonly Func<string, string, string, CancellationToken, Task<List<string>>> _localCommitReader;
+        private readonly Func<string, CancellationToken, Task<bool>> _pushSource;
         private List<string> _recentTargetRefs = [];
         private IAuthentication _auth;
         private Client _client;
@@ -755,6 +822,7 @@ namespace SourceGit.ViewModels
         private CreationResult _result;
         private PullRequest _existingPullRequest;
         private string _preferenceKey;
+        private string _previewSourceTip;
         private string _repositoryLabel;
         private string _clientId;
         private string _tenant;
@@ -770,6 +838,7 @@ namespace SourceGit.ViewModels
         private string _reviewerSearchStatus = string.Empty;
         private GitRef _target;
         private bool _searchingReviewers;
+        private bool _needsPush;
         private bool _reviewerSearchError;
         private bool _connectionExpanded;
         private bool _sessionOnly;

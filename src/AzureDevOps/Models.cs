@@ -79,8 +79,20 @@ namespace SourceGit.AzureDevOps
         public bool IsRequired { get; set; }
         public bool Inactive { get; set; }
         public Dictionary<string, IdentityProperty> Properties { get; set; } = [];
-        [JsonIgnore] public string Label => DisplayName ?? ProviderDisplayName ?? Id;
-        [JsonIgnore] public string Detail => UniqueName ?? (Properties.TryGetValue("Mail", out var mail) ? mail.Value : string.Empty);
+        [JsonIgnore]
+        public string Label
+        {
+            get
+            {
+                var display = DisplayName?.Trim();
+                var provider = ProviderDisplayName?.Trim();
+                if (!string.IsNullOrEmpty(provider) && (string.IsNullOrEmpty(display) || string.Equals(display, Contact, StringComparison.OrdinalIgnoreCase)))
+                    return provider;
+                return !string.IsNullOrEmpty(display) ? display : !string.IsNullOrEmpty(Contact) ? Contact : Id;
+            }
+        }
+        [JsonIgnore] public string Detail => string.Equals(Label, Contact, StringComparison.OrdinalIgnoreCase) ? string.Empty : Contact;
+        private string Contact => (!string.IsNullOrWhiteSpace(UniqueName) ? UniqueName : Properties.TryGetValue("Mail", out var mail) ? mail.Value : string.Empty)?.Trim() ?? string.Empty;
     }
 
     public sealed class IdentityProperty

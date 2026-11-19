@@ -12,36 +12,55 @@ namespace SourceGit.Views
             if (branch == null || branch.IsDetachedHead || !branch.IsHeadAuthoredByUser)
                 return null;
 
-            Models.Branch local = branch.IsLocal ? branch : null;
-            Models.Branch source = branch.IsLocal ? null : branch;
-            if (branch.IsLocal)
+            if (!branch.IsLocal)
             {
-                if (!string.IsNullOrEmpty(branch.Upstream))
-                    source = repo.Branches.Find(x => !x.IsLocal && x.FullName == branch.Upstream);
-                else
-                {
-                    // A normal push can publish a branch without configuring its upstream.
-                    // Infer only an exact, unique name-and-tip match on a supported remote.
-                    var candidates = repo.Branches.Where(x => !x.IsLocal && x.Name == branch.Name && SameTip(branch, x) &&
-                        repo.Remotes.Exists(r => r.Name == x.Remote && AzureDevOps.RemoteAddress.TryParse(r.URL, out _))).ToList();
-                    if (candidates.Count > 1)
-                        return Disabled(owner, "CreatePR.SelectPublishedBranch");
-                    source = candidates.SingleOrDefault();
-                }
-
-                if (source == null)
-                    return repo.Remotes.Exists(x => AzureDevOps.RemoteAddress.TryParse(x.URL, out _)) ? Disabled(owner, "CreatePR.PushFirst") : null;
+                var remote = repo.Remotes.Find(x => x.Name == branch.Remote);
+                if (remote == null || !AzureDevOps.RemoteAddress.TryParse(remote.URL, out _))
+                    return null;
+                // A remote-branch action uses the published revision, not unrelated local work.
+                var local = repo.Branches.Find(x => x.IsLocal && SameTip(x, branch) &&
+                    (x.Upstream == branch.FullName || (string.IsNullOrEmpty(x.Upstream) && x.Name == branch.Name)));
+                return CreateItem(owner, repo, remote, branch, local);
             }
 
-            var remote = repo.Remotes.Find(x => x.Name == source.Remote);
-            if (remote == null || !AzureDevOps.RemoteAddress.TryParse(remote.URL, out _))
+            if (!string.IsNullOrEmpty(branch.Upstream))
+            {
+                var remote = repo.Remotes.OrderByDescending(x => x.Name.Length)
+                    .FirstOrDefault(x => branch.Upstream.StartsWith($"refs/remotes/{x.Name}/", StringComparison.Ordinal));
+                if (remote == null || !AzureDevOps.RemoteAddress.TryParse(remote.URL, out _))
+                    return null;
+                var name = branch.Upstream[($"refs/remotes/{remote.Name}/").Length..];
+                return CreateItem(owner, repo, remote, Destination(repo, remote, name), branch);
+            }
+
+            var remotes = repo.Remotes.Where(x => AzureDevOps.RemoteAddress.TryParse(x.URL, out _)).ToList();
+            var matching = remotes.Where(x => repo.Branches.Exists(b => !b.IsLocal && b.Remote == x.Name && b.Name == branch.Name)).ToList();
+            if (matching.Count > 0)
+                remotes = matching;
+            var preferred = remotes.Find(x => x.Name == repo.Settings.DefaultRemote);
+            if (preferred != null)
+                remotes = [preferred];
+            if (remotes.Count == 0)
                 return null;
+            if (remotes.Count == 1)
+                return CreateItem(owner, repo, remotes[0], Destination(repo, remotes[0], branch.Name), branch);
 
-            local ??= repo.Branches.Find(x => x.IsLocal && x.Upstream == source.FullName) ??
-                repo.Branches.Find(x => x.IsLocal && string.IsNullOrEmpty(x.Upstream) && x.Name == source.Name);
-            if (local != null && !SameTip(local, source))
-                return Disabled(owner, "CreatePR.PushFirst");
+            var choices = new MenuItem { Header = App.Text("BranchCM.CreatePR"), Icon = owner.CreateMenuIcon("Icons.CreatePR"), Name = "CreateAzureDevOpsPullRequest" };
+            foreach (var remote in remotes)
+            {
+                var item = CreateItem(owner, repo, remote, Destination(repo, remote, branch.Name), branch);
+                item.Header = $"{remote.Name}/{branch.Name}";
+                choices.Items.Add(item);
+            }
+            return choices;
+        }
 
+        private static Models.Branch Destination(ViewModels.Repository repo, Models.Remote remote, string name) =>
+            repo.Branches.Find(x => !x.IsLocal && x.Remote == remote.Name && x.Name == name) ??
+            new() { Name = name, FullName = $"refs/remotes/{remote.Name}/{name}", Remote = remote.Name };
+
+        private static MenuItem CreateItem(Control owner, ViewModels.Repository repo, Models.Remote remote, Models.Branch source, Models.Branch local)
+        {
             var item = new MenuItem
             {
                 Header = App.Text("BranchCM.CreatePRForUpstream", source.FriendlyName),
@@ -59,12 +78,5 @@ namespace SourceGit.Views
         private static bool SameTip(Models.Branch local, Models.Branch remote) => !string.IsNullOrEmpty(local.Head) &&
             string.Equals(local.Head, remote.Head, StringComparison.OrdinalIgnoreCase);
 
-        private static MenuItem Disabled(Control owner, string reason) => new()
-        {
-            Header = App.Text(reason),
-            Icon = owner.CreateMenuIcon("Icons.CreatePR"),
-            IsEnabled = false,
-            Name = "CreateAzureDevOpsPullRequest",
-        };
     }
 }
