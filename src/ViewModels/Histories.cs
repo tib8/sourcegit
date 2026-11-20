@@ -326,12 +326,23 @@ namespace SourceGit.ViewModels
 
         public void ResumeQuickSearch() => RefreshQuickSearch();
 
-        private void ApplyQuickSearchFilter()
+        public void RefreshStashRows()
         {
-            var visible = IsQuickSearchFilterActive ? _quickSearchMatches : _commits;
-            if (ReferenceEquals(visible, _displayedCommits))
+            if (_revealedStashParent is { } parent &&
+                (!_repo.ShowStashes || !_repo.StashesPage.Stashes.Exists(stash => stash.Parents.Count > 0 && stash.Parents[0] == parent.SHA)))
+                _revealedStashParent = null;
+
+            ApplyQuickSearchFilter(true);
+        }
+
+        private void ApplyQuickSearchFilter(bool refreshStashes = false)
+        {
+            var source = IsQuickSearchFilterActive ? _quickSearchMatches : _commits;
+            if (!refreshStashes && ReferenceEquals(source, _displayedCommitSource))
                 return;
 
+            _displayedCommitSource = source;
+            var visible = IncludeRevealedStashParent(source);
             _displayedCommits = visible;
             IsUpdatingQuickSearchFilter = true;
             try
@@ -342,14 +353,7 @@ namespace SourceGit.ViewModels
                 {
                     if (!IsWorkingDirectoryVisible)
                         IsWorkingDirectorySelected = false;
-                    // DataGridCollectionView expands AddRange notifications into individual
-                    // insertions. Replacing 20,000 rows that way monopolizes the UI thread.
-                    // Populate off-binding, then expose the complete collection once.
-                    var entries = new List<object>(DisplayedCommits.Count + 1);
-                    if (IsWorkingDirectoryVisible)
-                        entries.Add(WorkingDirectory);
-                    entries.AddRange(DisplayedCommits);
-                    Entries = new AvaloniaList<object>(entries);
+                    RebuildEntries(visible);
                 }
                 finally
                 {
@@ -365,6 +369,67 @@ namespace SourceGit.ViewModels
             }
         }
 
+        private List<Models.Commit> IncludeRevealedStashParent(List<Models.Commit> commits) =>
+            _revealedStashParent is { } parent && !commits.Exists(commit => commit.SHA == parent.SHA) ?
+                InsertNavigationCommit(commits, parent) :
+                commits;
+
+        private void RebuildEntries(List<Models.Commit> commits)
+        {
+            var stashesByParent = new Dictionary<string, List<Models.Stash>>(StringComparer.Ordinal);
+            if (_repo.ShowStashes && _repo.StashesPage is { } page)
+            {
+                foreach (var stash in page.Stashes)
+                {
+                    if (stash.Parents.Count == 0)
+                        continue;
+
+                    var parent = stash.Parents[0];
+                    if (!stashesByParent.TryGetValue(parent, out var stashes))
+                        stashesByParent[parent] = stashes = [];
+                    stashes.Add(stash);
+                }
+            }
+
+            // Build the full collection before binding it, avoiding one DataGrid update per row.
+            var entries = new List<object>(commits.Count + 1);
+            if (IsWorkingDirectoryVisible)
+                entries.Add(WorkingDirectory);
+
+            _stashRows = null;
+            var previousStash = SelectedStashEntry?.Stash;
+            StashHistoryEntry selected = null;
+            if (stashesByParent.Count == 0)
+            {
+                entries.AddRange(commits);
+            }
+            else
+            {
+                for (var i = 0; i < commits.Count; i++)
+                {
+                    var commit = commits[i];
+                    if (stashesByParent.TryGetValue(commit.SHA, out var stashes))
+                    {
+                        _stashRows ??= new int[commits.Count];
+                        _stashRows[i] = stashes.Count;
+                        foreach (var stash in stashes)
+                        {
+                            var entry = new StashHistoryEntry(stash);
+                            entries.Add(entry);
+                            if (previousStash != null && previousStash.SHA == stash.SHA &&
+                                (selected == null || previousStash.Name == stash.Name))
+                                selected = entry;
+                        }
+                    }
+                    entries.Add(commit);
+                }
+            }
+
+            Entries = new AvaloniaList<object>(entries);
+            if (previousStash != null)
+                SelectHistoryEntries([], false, selected);
+        }
+
         public bool IsUpdatingEntries { get; private set; }
 
         public AvaloniaList<object> Entries
@@ -374,6 +439,7 @@ namespace SourceGit.ViewModels
         }
         public WorkingDirectoryEntry WorkingDirectory { get; } = new();
         public WorkingCopy WorkingCopy => _repo.WorkingCopy;
+        public Repository Repository => _repo;
 
         public bool IsWorkingDirectoryVisible => !(_isQuickSearchFilterEnabled && !string.IsNullOrEmpty(_quickSearchText)) && !_repo.IsBare && Preferences.Instance.WorkingDirectoryHeadMode switch
         {
@@ -411,10 +477,30 @@ namespace SourceGit.ViewModels
             RefreshWorkingDirectoryVisibility(true);
         }
 
-        public void SelectHistoryEntries(List<Models.Commit> commits, bool includeWorkingDirectory)
+        public StashHistoryEntry SelectedStashEntry
+        {
+            get => _selectedStashEntry;
+            private set => SetProperty(ref _selectedStashEntry, value);
+        }
+
+        private bool TrySelectStash(Models.Stash stash)
+        {
+            foreach (var item in Entries)
+            {
+                if (item is StashHistoryEntry entry && ReferenceEquals(entry.Stash, stash))
+                {
+                    SelectHistoryEntries([], false, entry);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public void SelectHistoryEntries(List<Models.Commit> commits, bool includeWorkingDirectory, StashHistoryEntry stash = null)
         {
             _updatingSelection = true;
             SetProperty(ref _isWorkingDirectorySelected, includeWorkingDirectory && IsWorkingDirectoryVisible && commits.Count <= 1, nameof(IsWorkingDirectorySelected));
+            SelectedStashEntry = stash;
             SelectedCommits = commits;
             _updatingSelection = false;
             PostSelectedCommitsChanged();
@@ -479,13 +565,17 @@ namespace SourceGit.ViewModels
                 if (!IsUpdatingQuickSearchFilter)
                     _selectionVersion++;
 
+                var hadStash = !_updatingSelection && SelectedStashEntry != null;
+                if (hadStash)
+                    SelectedStashEntry = null;
+
                 if (!_updatingSelection && value.Count > 0)
                 {
                     _selectHeadAfterRefresh = false;
                     IsWorkingDirectorySelected = false;
                 }
                 var oldCount = _selectedCommits.Count;
-                if (SetProperty(ref _selectedCommits, value) && oldCount + value.Count > 0)
+                if ((SetProperty(ref _selectedCommits, value) && oldCount + value.Count > 0) || hadStash)
                     PostSelectedCommitsChanged();
             }
         }
@@ -924,7 +1014,15 @@ namespace SourceGit.ViewModels
             if (_ignoreSelectionChange || _updatingSelection)
                 return;
 
-            if (IsWorkingDirectorySelected)
+            if (SelectedStashEntry is { } stash)
+            {
+                _selectHeadAfterRefresh = false;
+                _searchCommitContext.Selected = null;
+                _stashDetail ??= new StashesPage(_repo);
+                _stashDetail.SelectedStash = stash.Stash;
+                DetailContext = _stashDetail;
+            }
+            else if (IsWorkingDirectorySelected)
             {
                 _searchCommitContext.Selected = null;
                 if (_selectedCommits.Count == 1)
@@ -986,16 +1084,20 @@ namespace SourceGit.ViewModels
             {
                 foreach (var c in _selectedCommits)
                     extraHeads.Add(c.SHA);
+                if (SelectedStashEntry is { } stash)
+                    extraHeads.Add(stash.Stash.Parents[0]);
             }
 
             var reserveHeadLane = Preferences.Instance.WorkingDirectoryHeadMode != 0;
             var branchColors = _repo.BranchGraphColors;
+            var filtered = IsQuickSearchFilterActive;
+            var all = filtered ? IncludeRevealedStashParent(_commits) : commits;
             // Small histories remain immediate (including empty/working-directory rows).
             // Large histories must not monopolize the dispatcher during a refresh.
-            if ((IsQuickSearchFilterActive ? _commits.Count : commits.Count) > 256)
+            if (all.Count > 256)
             {
-                var snapshot = new Models.CommitGraph.Snapshot(_commits, commits, IsQuickSearchFilterActive,
-                    firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, reserveHeadLane, _repo.Bookmark, branchColors);
+                var snapshot = new Models.CommitGraph.Snapshot(all, commits, filtered,
+                    firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, reserveHeadLane, _repo.Bookmark, branchColors, _stashRows);
                 var cancellation = new CancellationTokenSource();
                 _graphCancellation = cancellation;
                 // The old graph may describe a different set/order of rows.
@@ -1004,9 +1106,10 @@ namespace SourceGit.ViewModels
                 return;
             }
 
-            var graph = IsQuickSearchFilterActive ?
-                Models.CommitGraph.GenerateFiltered(_commits, commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, reserveHeadLane, _repo.Bookmark, branchColors: branchColors) :
+            var graph = filtered ?
+                Models.CommitGraph.GenerateFiltered(all, commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, reserveHeadLane, _repo.Bookmark, branchColors: branchColors) :
                 Models.CommitGraph.Generate(commits, firstParentOnly, highlighting, extraHeads, IsWorkingDirectoryVisible, reserveHeadLane, _repo.Bookmark, branchColors: branchColors);
+            graph.AddStashRows(commits, _stashRows, IsWorkingDirectoryVisible);
             ApplyGraph(graph);
         }
 
@@ -1047,6 +1150,15 @@ namespace SourceGit.ViewModels
 
         private void ApplyGraph(Models.CommitGraph graph)
         {
+            if (_stashRows != null)
+            {
+                for (var i = 0; i < Entries.Count; i++)
+                {
+                    if (Entries[i] is StashHistoryEntry stash)
+                        stash.LeftMargin = graph.Dots[i].Center.X + 12;
+                }
+            }
+
             if (IsWorkingDirectoryVisible)
             {
                 WorkingDirectory.LeftMargin = graph.Dots[0].Center.X + 14;
@@ -1060,11 +1172,16 @@ namespace SourceGit.ViewModels
         private CancellationTokenSource _graphCancellation;
         private int _selectionVersion;
         private bool _isWorkingDirectorySelected;
+        private StashHistoryEntry _selectedStashEntry;
+        private StashesPage _stashDetail;
+        private Models.Commit _revealedStashParent;
+        private int[] _stashRows;
         private bool _updatingSelection;
         private string _quickSearchText = string.Empty;
         private bool _isQuickSearchFilterEnabled = false;
         private bool _isQuickSearching = false;
         private List<Models.Commit> _displayedCommits = [];
+        private List<Models.Commit> _displayedCommitSource;
         private List<Models.Commit> _quickSearchMatches = [];
         private CancellationTokenSource _quickSearchCancellation;
 

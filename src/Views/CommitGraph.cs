@@ -39,6 +39,15 @@ namespace SourceGit.Views
             set => SetValue(DotBrushProperty, value);
         }
 
+        public static readonly StyledProperty<Geometry> StashIconProperty =
+            AvaloniaProperty.Register<CommitGraph, Geometry>(nameof(StashIcon));
+
+        public Geometry StashIcon
+        {
+            get => GetValue(StashIconProperty);
+            set => SetValue(StashIconProperty, value);
+        }
+
         public override void Render(DrawingContext context)
         {
             base.Render(context);
@@ -66,7 +75,8 @@ namespace SourceGit.Views
 
             if (change.Property == GraphProperty ||
                 change.Property == LayoutProperty ||
-                change.Property == DotBrushProperty)
+                change.Property == DotBrushProperty ||
+                change.Property == StashIconProperty)
                 InvalidateVisual();
         }
 
@@ -92,6 +102,8 @@ namespace SourceGit.Views
                 }
 
                 var pen = link.IsHighlighted ? Models.CommitGraph.Pens[link.Color] : grayedPen;
+                if (link.IsDashed)
+                    pen = new Pen(pen.Brush, pen.Thickness, s_stashConnectorDash);
                 context.DrawGeometry(null, pen, geo);
             }
 
@@ -112,6 +124,8 @@ namespace SourceGit.Views
                 var pen = line.IsHighlighted ? Models.CommitGraph.Pens[line.Color] : grayedPen;
                 if (line.IsDotted)
                     pen = new Pen(pen.Brush, pen.Thickness, new DashStyle([0, 2], 0), PenLineCap.Round);
+                else if (line.IsDashed)
+                    pen = new Pen(pen.Brush, pen.Thickness, s_stashConnectorDash);
 
                 using (var ctx = geo.Open())
                 {
@@ -190,6 +204,19 @@ namespace SourceGit.Views
                     case Models.CommitGraph.DotType.WorkingDirectory:
                         context.DrawEllipse(dotFill, new Pen(pen.Brush, pen.Thickness, new DashStyle([2, 2], 0)), center, 6, 6);
                         break;
+                    case Models.CommitGraph.DotType.Stash:
+                        var frame = new Pen(pen.Brush, 1, new DashStyle([2, 2], 0));
+                        context.DrawRectangle(dotFill, frame, new Rect(center.X - 8, center.Y - 8, 16, 16), 2, 2);
+                        if (StashIcon is { } icon)
+                        {
+                            var bounds = icon.Bounds;
+                            var matrix = Matrix.CreateTranslation(-bounds.Center.X, -bounds.Center.Y) *
+                                Matrix.CreateScale(10 / bounds.Width, 10 / bounds.Height) *
+                                Matrix.CreateTranslation(center.X, center.Y);
+                            using (context.PushTransform(matrix))
+                                context.DrawGeometry(pen.Brush, null, icon);
+                        }
+                        break;
                     case Models.CommitGraph.DotType.Head:
                         context.DrawEllipse(dotFill, pen, center, 6, 6);
                         context.DrawEllipse(pen.Brush, null, center, 3, 3);
@@ -208,5 +235,6 @@ namespace SourceGit.Views
 
         private Models.CommitGraph _graph = null;
         private Models.CommitGraphLayout _layout = null;
+        private static readonly DashStyle s_stashConnectorDash = new([2, 2], 0);
     }
 }

@@ -39,6 +39,38 @@ namespace SourceGit.ViewModels
         public Task NavigateBackAsync() => NavigateHistoryAsync(-1);
         public Task NavigateForwardAsync() => NavigateHistoryAsync(1);
 
+        public async Task RevealStashAsync(Models.Stash stash)
+        {
+            if (TrySelectStash(stash))
+                return;
+
+            CancelNavigationVisit();
+            var request = _navigationRequest;
+            Models.Commit parent = null;
+            if (stash.Parents.Count > 0)
+            {
+                var sha = stash.Parents[0];
+                parent = _commits.Find(commit => commit.SHA == sha) ?? await GetCommitAsync(sha);
+            }
+
+            if (request != _navigationRequest || !_repo.IsDashboardVisible || !_repo.ShowStashes)
+                return;
+
+            var current = _repo.StashesPage.Stashes.Find(entry => entry.Name == stash.Name && entry.SHA == stash.SHA);
+            if (current == null)
+                return;
+
+            if (parent != null)
+            {
+                _revealedStashParent = parent;
+                RefreshStashRows();
+                if (TrySelectStash(current))
+                    return;
+            }
+
+            _repo.OpenStashPage(current);
+        }
+
         public void ResumeNavigationVisits()
         {
             _isNavigationActive = true;
@@ -152,12 +184,17 @@ namespace SourceGit.ViewModels
             if (existing != null)
                 return existing;
 
-            var commits = new List<Models.Commit>(_commits);
+            Commits = InsertNavigationCommit(_commits, commit);
+            return commit;
+        }
+
+        private static List<Models.Commit> InsertNavigationCommit(List<Models.Commit> source, Models.Commit commit)
+        {
+            var commits = new List<Models.Commit>(source);
             // Keep children above their parents when restoring an omitted row.
             var parentIndex = commits.FindIndex(c => commit.Parents.Contains(c.SHA));
             commits.Insert(parentIndex < 0 ? commits.Count : parentIndex, commit);
-            Commits = commits;
-            return commit;
+            return commits;
         }
 
         private bool HasUnrecordedNavigationSelection => _navigationHistory.Current != null &&

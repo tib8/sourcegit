@@ -336,7 +336,7 @@
                 </TextBox.InnerRightContent>
               </TextBox>
 
-              <Grid Grid.Row="1" x:Name="LeftSidebarGroups" Margin="0,4,0,0" RowDefinitions="28,Auto,28,Auto,28,Auto,28,Auto,28,Auto" SizeChanged="OnLeftSidebarSizeChanged">
+              <Grid Grid.Row="1" x:Name="LeftSidebarGroups" Margin="0,4,0,0" RowDefinitions="28,Auto,28,Auto,28,Auto,28,Auto,Auto,Auto,28,Auto" SizeChanged="OnLeftSidebarSizeChanged">
                 <!-- Local Branches -->
                 <ToggleButton Grid.Row="0" Classes="group_expander" IsChecked="{Binding IsLocalBranchGroupExpanded, Mode=TwoWay}"
                               DragDrop.AllowDrop="True" DragDrop.DragOver="OnLocalBranchGroupDragOver" DragDrop.Drop="OnLocalBranchGroupDrop">
@@ -496,8 +496,51 @@
                                   IsVisible="{Binding IsSubmoduleGroupExpanded, Mode=OneWay}"
                                   SearchRequested="OnToggleSidebarFilter"/>
 
+                <!-- Stashes -->
+                <ToggleButton Grid.Row="8" Height="28" Classes="group_expander"
+                              IsVisible="{Binding ShowStashes}"
+                              IsChecked="{Binding IsStashGroupExpanded, Mode=TwoWay}"
+                              PropertyChanged="OnSidebarListPropertyChanged">
+                  <Grid ColumnDefinitions="16,*">
+                    <Path Grid.Column="0" Width="11" Height="11" HorizontalAlignment="Left" Data="{StaticResource Icons.Stashes}" Fill="{DynamicResource Brush.FG2}"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                      <TextBlock Classes="group_header_label" Text="{DynamicResource Text.Stashes.Stashes}"/>
+                      <TextBlock Classes="group_header_label" Text="{Binding StashesCount, StringFormat='({0})'}" Margin="4,0,0,0"/>
+                    </StackPanel>
+                  </Grid>
+                </ToggleButton>
+                <ListBox Grid.Row="9"
+                         x:Name="SidebarStashList"
+                         Height="0"
+                         Margin="6,0,4,0"
+                         Padding="0,0,2,0"
+                         Classes="repo_left_content_list"
+                         ItemsSource="{Binding StashesPage.Stashes, Mode=OneWay}"
+                         SelectedItem="{Binding Histories.SelectedStashEntry.Stash, Mode=OneWay}"
+                         SelectionMode="Single"
+                         PropertyChanged="OnSidebarListPropertyChanged"
+                         KeyDown="OnSidebarStashKeyDown">
+                  <ListBox.IsVisible>
+                    <MultiBinding Converter="{x:Static BoolConverters.And}">
+                      <Binding Path="ShowStashes"/>
+                      <Binding Path="IsStashGroupExpanded"/>
+                    </MultiBinding>
+                  </ListBox.IsVisible>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="m:Stash">
+                      <Border Height="24" Background="Transparent" Tapped="OnSidebarStashTapped"
+                              ContextRequested="OnSidebarStashContextRequested" ToolTip.Tip="{Binding Message}">
+                        <Grid ColumnDefinitions="16,*" Margin="17,0,4,0">
+                          <Path Width="11" Height="11" HorizontalAlignment="Left" Data="{StaticResource Icons.Stashes}" Fill="{DynamicResource Brush.FG2}"/>
+                          <TextBlock Grid.Column="1" Text="{Binding Subject}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+
                 <!-- Worktrees -->
-                <ToggleButton Grid.Row="8" Classes="group_expander" IsChecked="{Binding IsWorktreeGroupExpanded, Mode=TwoWay}">
+                <ToggleButton Grid.Row="10" Classes="group_expander" IsChecked="{Binding IsWorktreeGroupExpanded, Mode=TwoWay}">
                   <Grid ColumnDefinitions="16,*,Auto,Auto">
                     <Path Grid.Column="0" Width="11" Height="11" HorizontalAlignment="Left" Data="{StaticResource Icons.Worktrees}" Fill="{DynamicResource Brush.FG2}"/>
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
@@ -524,14 +567,14 @@
                     </Button>
                   </Grid>
                 </ToggleButton>
-                <ListBox Grid.Row="9"
+                <ListBox Grid.Row="11"
                          x:Name="WorktreeList"
                          Height="0"
                          Margin="6,0,4,0"
                          Classes="repo_left_content_list"
                          ItemsSource="{Binding Worktrees, Mode=OneWay}"
                          SelectionMode="Single"
-                         PropertyChanged="OnWorktreeListPropertyChanged"
+                         PropertyChanged="OnSidebarListPropertyChanged"
                          IsVisible="{Binding IsWorktreeGroupExpanded, Mode=OneWay}">
                   <ListBox.Styles>
                     <Style Selector="ListBoxItem">

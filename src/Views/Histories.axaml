@@ -122,6 +122,7 @@
                                ItemsSource="{Binding Entries, Mode=OneWay}"
                                TotalCommits="{Binding DisplayedCommits.Count, Mode=OneWay}"
                                SelectedCommits="{Binding SelectedCommits, Mode=TwoWay}"
+                               SelectedStashEntry="{Binding SelectedStashEntry, Mode=OneWay}"
                                ColumnDisplayIndexChanged="OnColumnDisplayIndexChanged"
                                ColumnHeaderHeight="24"
                                RowHeight="26"
@@ -185,6 +186,9 @@
               <Setter Property="Padding" Value="{Binding LeftMargin, Converter={x:Static c:DoubleConverters.ToLeftMargin}}"/>
             </Style>
             <Style Selector="Border.history_working_directory" x:DataType="vm:WorkingDirectoryEntry">
+              <Setter Property="Padding" Value="{Binding LeftMargin, Converter={x:Static c:DoubleConverters.ToLeftMargin}}"/>
+            </Style>
+            <Style Selector="Border.history_stash" x:DataType="vm:StashHistoryEntry">
               <Setter Property="Padding" Value="{Binding LeftMargin, Converter={x:Static c:DoubleConverters.ToLeftMargin}}"/>
             </Style>
             <Style Selector="Border.separate_tree">
@@ -269,6 +273,14 @@
                           </Grid>
                         </Border>
                       </DataTemplate>
+                      <DataTemplate DataType="vm:StashHistoryEntry">
+                        <Border Classes="history_stash"
+                                Classes.separate_tree="{Binding $parent[v:Histories].((vm:Histories)DataContext).IsTreeColumnVisible}"
+                                ClipToBounds="True" ToolTip.Tip="{Binding Stash.Message}">
+                          <TextBlock Text="{Binding Stash.Subject}" TextTrimming="CharacterEllipsis"
+                                     Margin="2,0,4,0" VerticalAlignment="Center"/>
+                        </Border>
+                      </DataTemplate>
                       <DataTemplate DataType="vm:WorkingDirectoryEntry">
                         <Border Classes="history_working_directory"
                                 Classes.separate_tree="{Binding $parent[v:Histories].((vm:Histories)DataContext).IsTreeColumnVisible}"
@@ -325,6 +337,7 @@
                         </Grid>
                       </DataTemplate>
                       <DataTemplate DataType="vm:WorkingDirectoryEntry"><TextBlock/></DataTemplate>
+                      <DataTemplate DataType="vm:StashHistoryEntry"><TextBlock/></DataTemplate>
                     </ContentControl.DataTemplates>
                   </ContentControl>
                 </DataTemplate>
@@ -356,6 +369,7 @@
                         </Border>
                       </DataTemplate>
                       <DataTemplate DataType="vm:WorkingDirectoryEntry"><TextBlock/></DataTemplate>
+                      <DataTemplate DataType="vm:StashHistoryEntry"><TextBlock/></DataTemplate>
                     </ContentControl.DataTemplates>
                   </ContentControl>
                 </DataTemplate>
@@ -383,6 +397,7 @@
                         </Border>
                       </DataTemplate>
                       <DataTemplate DataType="vm:WorkingDirectoryEntry"><TextBlock/></DataTemplate>
+                      <DataTemplate DataType="vm:StashHistoryEntry"><TextBlock/></DataTemplate>
                     </ContentControl.DataTemplates>
                   </ContentControl>
                 </DataTemplate>
@@ -410,6 +425,7 @@
                         </Border>
                       </DataTemplate>
                       <DataTemplate DataType="vm:WorkingDirectoryEntry"><TextBlock/></DataTemplate>
+                      <DataTemplate DataType="vm:StashHistoryEntry"><TextBlock/></DataTemplate>
                     </ContentControl.DataTemplates>
                   </ContentControl>
                 </DataTemplate>
@@ -455,6 +471,7 @@
                                                  ShowBranchSummary="True"/>
                         </Border>
                       </DataTemplate>
+                      <DataTemplate DataType="vm:StashHistoryEntry"><TextBlock/></DataTemplate>
                     </ContentControl.DataTemplates>
                   </ContentControl>
                 </DataTemplate>
@@ -514,6 +531,7 @@
         <v:CommitGraph Grid.Row="1" x:Name="CommitGraph"
                        Margin="0,24,0,0"
                        Graph="{Binding Graph}"
+                       StashIcon="{StaticResource Icons.Stashes}"
                        DotBrush="{Binding #CommitListContainer.Background}"
                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                        IsHitTestVisible="False"
@@ -603,6 +621,19 @@
                     </MultiBinding>
                   </v:WorkingCopyHost.Active>
                 </v:WorkingCopyHost>
+              </TabItem>
+            </TabControl>
+          </DataTemplate>
+
+          <DataTemplate DataType="vm:StashesPage">
+            <TabControl Padding="0">
+              <TabItem>
+                <TabItem.Header>
+                  <Border Background="Transparent" PointerPressed="OnTabHeaderPointerPressed">
+                    <TextBlock Classes="tab_header" Text="{DynamicResource Text.Stashes}"/>
+                  </Border>
+                </TabItem.Header>
+                <v:StashesPage IsEmbedded="True" IsVisible="{Binding #ThisControl.IsDetailsPanelExpanded, Mode=OneWay}"/>
               </TabItem>
             </TabControl>
           </DataTemplate>

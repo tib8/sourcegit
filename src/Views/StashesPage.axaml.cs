@@ -2,22 +2,47 @@
 using System.IO;
 using System.Text;
 
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Platform.Storage;
+using Avalonia.Interactivity;
 
 namespace SourceGit.Views
 {
     public partial class StashesPage : UserControl
     {
+        public static readonly StyledProperty<bool> IsEmbeddedProperty =
+            AvaloniaProperty.Register<StashesPage, bool>(nameof(IsEmbedded));
+
+        public bool IsEmbedded
+        {
+            get => GetValue(IsEmbeddedProperty);
+            set => SetValue(IsEmbeddedProperty, value);
+        }
+
         public StashesPage()
         {
             InitializeComponent();
         }
 
+        protected override void OnLoaded(RoutedEventArgs e)
+        {
+            base.OnLoaded(e);
+            if (!IsEmbedded || Content is not Grid grid)
+                return;
+
+            grid.ColumnDefinitions[0].ClearValue(ColumnDefinition.WidthProperty);
+            grid.ColumnDefinitions[0].MinWidth = 0;
+            grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+            grid.ColumnDefinitions[2].MinWidth = 0;
+            grid.ColumnDefinitions[2].Width = new GridLength(2, GridUnitType.Star);
+            for (var i = 0; i < 3; i++)
+                StashListAndChanges.RowDefinitions[i].Height = new GridLength(0);
+        }
+
         private void OnMainLayoutSizeChanged(object sender, SizeChangedEventArgs e)
         {
-            if (sender is not Grid grid)
+            if (IsEmbedded || sender is not Grid grid)
                 return;
 
             var layout = ViewModels.Preferences.Instance.Layout;
@@ -47,85 +72,8 @@ namespace SourceGit.Views
 
         private void OnStashContextRequested(object sender, ContextRequestedEventArgs e)
         {
-            if (DataContext is ViewModels.StashesPage vm &&
-                sender is Border { DataContext: Models.Stash stash } border)
-            {
-                var apply = new MenuItem();
-                apply.Header = App.ContextMenuText("StashCM.Apply");
-                apply.Icon = this.CreateMenuIcon("Icons.CheckCircled");
-                apply.Click += (_, ev) =>
-                {
-                    vm.Apply(stash);
-                    ev.Handled = true;
-                };
-
-                var branch = new MenuItem();
-                branch.Header = App.Text("StashCM.Branch");
-                branch.Icon = this.CreateMenuIcon("Icons.Branch.Add");
-                branch.Click += (_, ev) =>
-                {
-                    vm.CheckoutBranch(stash);
-                    ev.Handled = true;
-                };
-
-                var drop = new MenuItem();
-                drop.Header = App.ContextMenuText("StashCM.Drop");
-                drop.Icon = this.CreateMenuIcon("Icons.Clear");
-                drop.Tag = "Back/Delete";
-                drop.Click += (_, ev) =>
-                {
-                    vm.Drop(stash);
-                    ev.Handled = true;
-                };
-
-                var patch = new MenuItem();
-                patch.Header = App.Text("StashCM.SaveAsPatch");
-                patch.Icon = this.CreateMenuIcon("Icons.Save");
-                patch.Click += async (_, ev) =>
-                {
-                    var storageProvider = TopLevel.GetTopLevel(this)?.StorageProvider;
-                    if (storageProvider == null)
-                        return;
-
-                    var options = new FilePickerSaveOptions();
-                    options.Title = App.Text("StashCM.SaveAsPatch");
-                    options.DefaultExtension = ".patch";
-                    options.FileTypeChoices = [new FilePickerFileType("Patch File") { Patterns = ["*.patch"] }];
-
-                    try
-                    {
-                        var storageFile = await storageProvider.SaveFilePickerAsync(options);
-                        if (storageFile != null)
-                            await vm.SaveStashAsPatchAsync(stash, storageFile.Path.LocalPath);
-                    }
-                    catch (Exception exception)
-                    {
-                        Models.Notification.Send(null, $"Failed to save as patch: {exception.Message}", true);
-                    }
-
-                    ev.Handled = true;
-                };
-
-                var copy = new MenuItem();
-                copy.Header = App.Text("StashCM.CopyMessage");
-                copy.Icon = this.CreateMenuIcon("Icons.Copy");
-                copy.Tag = OperatingSystem.IsMacOS() ? "⌘+C" : "Ctrl+C";
-                copy.Click += async (_, ev) =>
-                {
-                    await this.CopyTextAsync(stash.Message);
-                    ev.Handled = true;
-                };
-
-                var menu = new ContextMenu();
-                menu.Items.Add(apply);
-                menu.Items.Add(branch);
-                menu.Items.Add(drop);
-                menu.Items.Add(new MenuItem { Header = "-" });
-                menu.Items.Add(patch);
-                menu.Items.Add(new MenuItem { Header = "-" });
-                menu.Items.Add(copy);
-                menu.Open(border);
-            }
+            if (DataContext is ViewModels.StashesPage page && sender is Border { DataContext: Models.Stash stash } row)
+                StashContextMenu.Create(row, page, stash, showShortcuts: true).Open(row);
 
             e.Handled = true;
         }

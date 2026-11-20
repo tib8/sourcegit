@@ -49,6 +49,7 @@ namespace SourceGit.Models
             public int Color { get; } = color;
             public bool IsHighlighted { get; } = isHighlighted;
             public bool IsDotted { get; init; }
+            public bool IsDashed { get; init; }
         }
 
         public class Link
@@ -58,6 +59,7 @@ namespace SourceGit.Models
             public Point End;
             public int Color;
             public bool IsHighlighted;
+            public bool IsDashed;
         }
 
         public enum DotType
@@ -66,6 +68,7 @@ namespace SourceGit.Models
             Head,
             Merge,
             WorkingDirectory,
+            Stash,
         }
 
         public class Dot
@@ -80,12 +83,90 @@ namespace SourceGit.Models
         public List<Link> Links { get; } = [];
         public List<Dot> Dots { get; } = [];
 
+        public void AddStashRows(IReadOnlyList<Commit> commits, int[] stashRows, bool hasWorkingDirectory, CancellationToken cancellationToken = default)
+        {
+            if (stashRows == null)
+                return;
+
+            var firstCommitRow = hasWorkingDirectory ? 1 : 0;
+            var shifts = new int[Dots.Count + 1];
+            var extraRows = 0;
+            for (var i = 0; i < stashRows.Length; i++)
+            {
+                extraRows += stashRows[i];
+                shifts[i + firstCommitRow] = extraRows;
+            }
+            shifts[^1] = extraRows;
+
+            Point Shift(Point point) => point + new Vector(0, shifts[Math.Clamp((int)point.Y, 0, shifts.Length - 1)]);
+
+            foreach (var path in Paths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                for (var i = 0; i < path.Points.Count; i++)
+                    path.Points[i] = Shift(path.Points[i]);
+            }
+            foreach (var link in Links)
+            {
+                link.Start = Shift(link.Start);
+                link.Control = Shift(link.Control);
+                link.End = Shift(link.End);
+            }
+
+            var dots = new List<Dot>(Dots.Count + extraRows);
+            if (hasWorkingDirectory)
+                dots.Add(Dots[0]);
+
+            for (var i = 0; i < commits.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var parent = Dots[i + firstCommitRow];
+                parent.Center = Shift(parent.Center);
+
+                var count = stashRows[i];
+                if (count > 0)
+                {
+                    // Keep one lane for the markers and one shared connector to
+                    // their base, even when many stashes share the same commit.
+                    var connectorX = commits[i].LeftMargin + 2;
+                    var connector = new Path(parent.Color, parent.IsHighlighted) { IsDashed = true };
+                    connector.Points.Add(new Point(connectorX, parent.Center.Y - count));
+                    if (count > 1)
+                        connector.Points.Add(new Point(connectorX, parent.Center.Y - 1));
+                    connector.Points.Add(parent.Center);
+                    Paths.Add(connector);
+
+                    for (var beforeParent = count; beforeParent > 0; beforeParent--)
+                    {
+                        var center = new Point(connectorX + 13, parent.Center.Y - beforeParent);
+                        var join = new Point(connectorX, center.Y);
+                        dots.Add(new Dot { Type = DotType.Stash, Center = center, Color = parent.Color, IsHighlighted = parent.IsHighlighted });
+                        Links.Add(new Link
+                        {
+                            Start = center,
+                            Control = join,
+                            End = join,
+                            Color = parent.Color,
+                            IsHighlighted = parent.IsHighlighted,
+                            IsDashed = true,
+                        });
+                    }
+                }
+                dots.Add(parent);
+            }
+
+            Dots.Clear();
+            Dots.AddRange(dots);
+            Links.Sort((left, right) => left.Start.Y.CompareTo(right.Start.Y));
+        }
+
         // Capture on the UI thread. Generation mutates only detached commit copies and
         // never reads the live palette, selection, or bound commit properties.
         public sealed class Snapshot
         {
             public Snapshot(List<Commit> all, List<Commit> visible, bool filtered, bool firstParentOnly,
-                CommitGraphHighlighting highlighting, HashSet<string> extraHeads, bool workingDirectory, bool reserveHeadLane, int bookmark, BranchGraphColors branchColors = null)
+                CommitGraphHighlighting highlighting, HashSet<string> extraHeads, bool workingDirectory, bool reserveHeadLane, int bookmark,
+                BranchGraphColors branchColors = null, int[] stashRows = null)
             {
                 _targets = visible;
                 _filtered = filtered;
@@ -94,6 +175,7 @@ namespace SourceGit.Models
                 _extraHeads = new(extraHeads);
                 _workingDirectory = workingDirectory;
                 _reserveHeadLane = reserveHeadLane;
+                _stashRows = stashRows;
                 _colorCount = s_penCount;
                 _headColor = GetBookmarkColor(bookmark);
                 _paletteVersion = s_paletteVersion;
@@ -117,11 +199,16 @@ namespace SourceGit.Models
                 _visible = visible.ConvertAll(c => copies[c.SHA]);
             }
 
-            public CommitGraph Generate(CancellationToken cancellationToken) => _filtered ?
-                GenerateFiltered(_all, _visible, _firstParentOnly, _highlighting, new(_extraHeads), _workingDirectory, _reserveHeadLane,
-                    _colorCount, _headColor, cancellationToken, _detachedBranchColors, _palette) :
-                CommitGraph.Generate(_visible, _firstParentOnly, _highlighting, new(_extraHeads), _workingDirectory, _reserveHeadLane,
-                    null, _colorCount, _headColor, cancellationToken, _detachedBranchColors, _palette);
+            public CommitGraph Generate(CancellationToken cancellationToken)
+            {
+                var graph = _filtered ?
+                    GenerateFiltered(_all, _visible, _firstParentOnly, _highlighting, new(_extraHeads), _workingDirectory, _reserveHeadLane,
+                        _colorCount, _headColor, cancellationToken, _detachedBranchColors, _palette) :
+                    CommitGraph.Generate(_visible, _firstParentOnly, _highlighting, new(_extraHeads), _workingDirectory, _reserveHeadLane,
+                        null, _colorCount, _headColor, cancellationToken, _detachedBranchColors, _palette);
+                graph.AddStashRows(_visible, _stashRows, _workingDirectory, cancellationToken);
+                return graph;
+            }
 
             public void Apply()
             {
@@ -151,6 +238,7 @@ namespace SourceGit.Models
             private readonly HashSet<string> _extraHeads;
             private readonly bool _workingDirectory;
             private readonly bool _reserveHeadLane;
+            private readonly int[] _stashRows;
             private readonly int _colorCount;
             private readonly int _headColor;
             private readonly long _paletteVersion;
