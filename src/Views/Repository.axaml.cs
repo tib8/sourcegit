@@ -293,7 +293,34 @@ namespace SourceGit.Views
             e.Handled = true;
         }
 
-        private void OnWorktreeListPropertyChanged(object _, AvaloniaPropertyChangedEventArgs e)
+        private async void OnSidebarStashTapped(object sender, TappedEventArgs e)
+        {
+            if (sender is Control { DataContext: Models.Stash stash } && DataContext is ViewModels.Repository repo)
+            {
+                e.Handled = true;
+                await repo.OpenStashAsync(stash);
+            }
+        }
+
+        private async void OnSidebarStashKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter && sender is ListBox { SelectedItem: Models.Stash stash } && DataContext is ViewModels.Repository repo)
+            {
+                e.Handled = true;
+                await repo.OpenStashAsync(stash);
+            }
+        }
+
+        private void OnSidebarStashContextRequested(object sender, ContextRequestedEventArgs e)
+        {
+            if (sender is Control { DataContext: Models.Stash stash } row && DataContext is ViewModels.Repository repo)
+            {
+                StashContextMenu.Create(row, repo.StashesPage, stash).Open(row);
+                e.Handled = true;
+            }
+        }
+
+        private void OnSidebarListPropertyChanged(object _, AvaloniaPropertyChangedEventArgs e)
         {
             if (e.Property == ItemsControl.ItemsSourceProperty || e.Property == IsVisibleProperty)
                 UpdateLeftSidebarLayout();
@@ -319,7 +346,7 @@ namespace SourceGit.Views
             if (DataContext is not ViewModels.Repository { UIStates: { } } vm)
                 return;
 
-            var leftHeight = LeftSidebarGroups.Bounds.Height - 28.0 * 5 - 4;
+            var leftHeight = LeftSidebarGroups.Bounds.Height - 28.0 * (vm.ShowStashes ? 6 : 5) - 4;
             if (leftHeight <= 0)
                 return;
 
@@ -328,8 +355,9 @@ namespace SourceGit.Views
             var desiredBranches = (localBranchRows + remoteBranchRows) * 24.0;
             var desiredTag = vm.IsTagGroupExpanded ? 24.0 * TagsList.Rows : 0;
             var desiredSubmodule = vm.IsSubmoduleGroupExpanded ? 24.0 * SubmoduleList.Rows : 0;
+            var desiredStash = vm.ShowStashes && vm.IsStashGroupExpanded ? 24.0 * (vm.StashesPage?.Stashes.Count ?? 0) : 0;
             var desiredWorktree = vm.IsWorktreeGroupExpanded ? 24.0 * vm.Worktrees.Count : 0;
-            var desiredOthers = desiredTag + desiredSubmodule + desiredWorktree;
+            var desiredOthers = desiredTag + desiredSubmodule + desiredStash + desiredWorktree;
             var hasOverflow = (desiredBranches + desiredOthers > leftHeight);
 
             if (vm.IsWorktreeGroupExpanded)
@@ -337,7 +365,7 @@ namespace SourceGit.Views
                 var height = desiredWorktree;
                 if (hasOverflow)
                 {
-                    var test = leftHeight - desiredBranches - desiredTag - desiredSubmodule;
+                    var test = leftHeight - desiredBranches - desiredTag - desiredSubmodule - desiredStash;
                     if (test < 0)
                         height = Math.Min(120, height);
                     else
@@ -346,8 +374,15 @@ namespace SourceGit.Views
 
                 leftHeight -= height;
                 WorktreeList.Height = height;
-                hasOverflow = (desiredBranches + desiredTag + desiredSubmodule) > leftHeight;
+                hasOverflow = (desiredBranches + desiredTag + desiredSubmodule + desiredStash) > leftHeight;
             }
+
+            var stashHeight = desiredStash;
+            if (stashHeight > 0 && hasOverflow)
+                stashHeight = Math.Min(stashHeight, Math.Max(120, leftHeight - desiredBranches - desiredTag - desiredSubmodule));
+            SidebarStashList.Height = stashHeight;
+            leftHeight -= stashHeight;
+            hasOverflow = (desiredBranches + desiredTag + desiredSubmodule) > leftHeight;
 
             if (vm.IsSubmoduleGroupExpanded)
             {

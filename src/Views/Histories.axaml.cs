@@ -109,6 +109,18 @@ namespace SourceGit.Views
             set => SetAndRaise(SelectedCommitsProperty, ref _selectedCommits, value);
         }
 
+        public static readonly DirectProperty<HistoriesCommitList, ViewModels.StashHistoryEntry> SelectedStashEntryProperty =
+            AvaloniaProperty.RegisterDirect<HistoriesCommitList, ViewModels.StashHistoryEntry>(
+                nameof(SelectedStashEntry),
+                static o => o.SelectedStashEntry,
+                static (o, v) => o.SelectedStashEntry = v);
+
+        public ViewModels.StashHistoryEntry SelectedStashEntry
+        {
+            get => _selectedStashEntry;
+            set => SetAndRaise(SelectedStashEntryProperty, ref _selectedStashEntry, value);
+        }
+
         protected override Type StyleKeyOverride => typeof(DataGrid);
 
         public HistoriesCommitList()
@@ -149,10 +161,7 @@ namespace SourceGit.Views
                     {
                         UpdateLayout();
                         ApplySelection();
-                        if (SelectedCommits is { Count: 1 } selected && ItemsSource is IList<object> items && items.Contains(selected[0]))
-                            ScrollIntoView(selected[0], null);
-                        else if (DataContext is ViewModels.Histories { IsWorkingDirectorySelected: true } histories)
-                            ScrollIntoView(histories.WorkingDirectory, null);
+                        ScrollToSelection();
                     }
                     finally
                     {
@@ -163,13 +172,11 @@ namespace SourceGit.Views
             }
             base.OnPropertyChanged(change);
 
-            if (change.Property == SelectedCommitsProperty && IsLoaded && !_ignoreSelectionChanged && !_restoringSelection)
+            if ((change.Property == SelectedCommitsProperty || change.Property == SelectedStashEntryProperty) &&
+                IsLoaded && !_ignoreSelectionChanged && !_restoringSelection)
             {
                 ApplySelection();
-                if (change.NewValue is List<Models.Commit> { Count: 1 } selected)
-                    ScrollIntoView(selected[0], null);
-                else if (DataContext is ViewModels.Histories { IsWorkingDirectorySelected: true } histories)
-                    ScrollIntoView(histories.WorkingDirectory, null);
+                ScrollToSelection();
             }
         }
 
@@ -182,6 +189,27 @@ namespace SourceGit.Views
 
             if (ItemsSource is not IList<object> items)
                 return;
+
+            // Only a standalone stash row has a stash diff. Shift ranges and
+            // commit comparisons still operate on the ordinary history entries.
+            if (SelectedItems.Count > 1)
+            {
+                _ignoreSelectionChanged = true;
+                if (e.AddedItems.Count == 1 && e.AddedItems[0] is ViewModels.StashHistoryEntry addedStash)
+                {
+                    SelectedItems.Clear();
+                    SelectedItems.Add(addedStash);
+                }
+                else
+                {
+                    for (var i = SelectedItems.Count - 1; i >= 0; i--)
+                    {
+                        if (SelectedItems[i] is ViewModels.StashHistoryEntry)
+                            SelectedItems.RemoveAt(i);
+                    }
+                }
+                _ignoreSelectionChanged = false;
+            }
 
             if (DataContext is ViewModels.Histories vm)
             {
@@ -224,7 +252,8 @@ namespace SourceGit.Views
                 _ignoreSelectionChanged = true;
 
                 if (DataContext is ViewModels.Histories histories)
-                    histories.SelectHistoryEntries(commits, SelectedItems.Contains(histories.WorkingDirectory));
+                    histories.SelectHistoryEntries(commits, SelectedItems.Contains(histories.WorkingDirectory),
+                        SelectedItems.Count == 1 ? SelectedItems[0] as ViewModels.StashHistoryEntry : null);
                 else
                     SelectedCommits = commits;
 
@@ -275,19 +304,41 @@ namespace SourceGit.Views
                 base.OnKeyDown(e);
         }
 
+        private void ScrollToSelection()
+        {
+            if (ItemsSource is not IList<object> items)
+                return;
+
+            if (SelectedStashEntry is { } stash && items.Contains(stash))
+                ScrollIntoView(stash, null);
+            else if (SelectedCommits is { Count: 1 } selected && items.Contains(selected[0]))
+                ScrollIntoView(selected[0], null);
+            else if (DataContext is ViewModels.Histories { IsWorkingDirectorySelected: true } histories)
+                ScrollIntoView(histories.WorkingDirectory, null);
+        }
+
         private void ApplySelection()
         {
             _ignoreSelectionChanged = true;
             SelectedItems.Clear();
-            if (DataContext is ViewModels.Histories { IsWorkingDirectorySelected: true } vm &&
-                ItemsSource is IList<object> workingItems && workingItems.Contains(vm.WorkingDirectory))
-                SelectedItems.Add(vm.WorkingDirectory);
-            if (SelectedCommits != null && ItemsSource is IList<object> items)
+            if (ItemsSource is IList<object> items)
             {
-                foreach (var c in SelectedCommits)
+                if (SelectedStashEntry is { } stash && items.Contains(stash))
                 {
-                    if (items.Contains(c))
-                        SelectedItems.Add(c);
+                    SelectedItems.Add(stash);
+                }
+                else
+                {
+                    if (DataContext is ViewModels.Histories { IsWorkingDirectorySelected: true } vm && items.Contains(vm.WorkingDirectory))
+                        SelectedItems.Add(vm.WorkingDirectory);
+                    if (SelectedCommits != null)
+                    {
+                        foreach (var c in SelectedCommits)
+                        {
+                            if (items.Contains(c))
+                                SelectedItems.Add(c);
+                        }
+                    }
                 }
             }
             _ignoreSelectionChanged = false;
@@ -298,6 +349,7 @@ namespace SourceGit.Views
         private int _itemsSourceVersion;
         private int _totalCommits = 0;
         private List<Models.Commit> _selectedCommits = [];
+        private ViewModels.StashHistoryEntry _selectedStashEntry;
     }
 
     public partial class Histories : UserControl
@@ -805,6 +857,15 @@ namespace SourceGit.Views
                 ev.Handled = true;
             };
 
+            var stashes = new MenuItem { Header = App.Text("Repository.ShowStashes"), IsEnabled = !histories.Repository.IsBare };
+            if (histories.Repository.ShowStashes)
+                stashes.Icon = this.CreateMenuIcon("Icons.Check");
+            stashes.Click += (_, ev) =>
+            {
+                histories.Repository.ShowStashes = !histories.Repository.ShowStashes;
+                ev.Handled = true;
+            };
+
             var order = new MenuItem();
             order.Header = new TextBlock() { Text = App.Text("Repository.HistoriesOrder"), FontWeight = FontWeight.Bold };
             order.IsEnabled = false;
@@ -960,6 +1021,7 @@ namespace SourceGit.Views
             menu.Items.Add(reflog);
             menu.Items.Add(firstParentOnly);
             menu.Items.Add(simplifyByDecoration);
+            menu.Items.Add(stashes);
             menu.Items.Add(new MenuItem() { Header = "-" });
             menu.Items.Add(order);
             menu.Items.Add(dateOrder);
@@ -1008,6 +1070,8 @@ namespace SourceGit.Views
                             treeWidth = Math.Max(treeWidth, commit.LeftMargin + 4);
                         else if (row.DataContext is ViewModels.WorkingDirectoryEntry workingDirectory)
                             treeWidth = Math.Max(treeWidth, workingDirectory.LeftMargin + 4);
+                        else if (row.DataContext is ViewModels.StashHistoryEntry stash)
+                            treeWidth = Math.Max(treeWidth, stash.LeftMargin + 4);
                     }
 
                     if (row.Bounds.Top <= 0 && row.Bounds.Top > -rowHeight)
@@ -1127,6 +1191,13 @@ namespace SourceGit.Views
             var repoView = this.FindAncestorOfType<Repository>();
             if (repoView is not { DataContext: ViewModels.Repository repo })
                 return;
+
+            if (e.Source is Control { DataContext: ViewModels.StashHistoryEntry stash })
+            {
+                StashContextMenu.Create(CommitListContainer, repo.StashesPage, stash.Stash).Open(CommitListContainer);
+                e.Handled = true;
+                return;
+            }
 
             if (e.Source is Control { DataContext: ViewModels.WorkingDirectoryEntry })
             {

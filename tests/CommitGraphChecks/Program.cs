@@ -13,12 +13,35 @@ internal static class Program
         CheckHighlighting();
         CheckSmallPalettes();
         CheckMasterGraphFeatures();
+        CheckStashRows();
         CheckDetachedSnapshot();
         CheckPersistentBranchColors();
         CheckPersistentMergeLane();
         CheckPaletteChanges();
         CheckPersistentSnapshot();
         Console.WriteLine($"PASS: {_checks} commit graph checks");
+    }
+
+    private static void CheckStashRows()
+    {
+        var root = new Commit { SHA = "stash-base" };
+        var skipped = Commit("stash-skipped", root);
+        var head = Commit("stash-head", skipped, "HEAD -> refs/heads/main");
+        List<Commit> all = [head, skipped, root];
+        List<Commit> visible = [head, root];
+        var basic = CommitGraph.GenerateFiltered(all, visible, true, CommitGraphHighlighting.All, [], true);
+        var snapshot = new CommitGraph.Snapshot(all, visible, true, true, CommitGraphHighlighting.All, [], true, true, 0,
+            stashRows: [0, 50]);
+        var graph = Task.Run(() => snapshot.Generate(CancellationToken.None)).GetAwaiter().GetResult();
+        var stashes = graph.Dots.Skip(2).Take(50).ToArray();
+        Check(stashes.Length == 50 && stashes.All(dot => dot.Type == CommitGraph.DotType.Stash && dot.Center.X == stashes[0].Center.X),
+            "many stashes sharing a base fit in one lane");
+        Check(graph.Dots.Count == 53 && graph.Dots.Select(dot => dot.Center.Y).SequenceEqual(Enumerable.Range(0, 53).Select(row => row + 0.5)),
+            "working-directory, ordinary and stash dots follow the filtered row indexes");
+        Check(graph.Dots[0].Center == basic.Dots[0].Center && graph.Dots[1].Center == basic.Dots[1].Center &&
+            graph.Dots[^1].Center.X == basic.Dots[^1].Center.X &&
+            graph.Paths.Any(path => path.Points[^1] == graph.Dots[^1].Center && path.Points[0].Y == stashes[0].Center.Y) &&
+            visible[0].Parents.Single() == skipped.SHA, "projecting stash rows preserves ordinary lanes and parent hashes");
     }
 
     private static void CheckDetachedSnapshot()

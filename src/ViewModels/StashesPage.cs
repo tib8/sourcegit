@@ -45,45 +45,42 @@ namespace SourceGit.ViewModels
             get => _selectedStash;
             set
             {
-                if (SetProperty(ref _selectedStash, value))
+                if (!SetProperty(ref _selectedStash, value))
+                    return;
+
+                Changes = null;
+                _untracked.Clear();
+                if (value == null)
+                    return;
+
+                Task.Run(async () =>
                 {
-                    if (value == null)
+                    var changes = await new Commands.CompareRevisions(_repo.FullPath, $"{value.SHA}^", value.SHA)
+                        .ReadAsync()
+                        .ConfigureAwait(false);
+
+                    var untracked = new List<Models.Change>();
+                    if (value.Parents.Count == 3)
                     {
-                        Changes = null;
-                        _untracked.Clear();
+                        untracked = await new Commands.CompareRevisions(_repo.FullPath, value.UntrackedParent, value.Parents[2])
+                            .ReadAsync()
+                            .ConfigureAwait(false);
+
+                        var needSort = changes.Count > 0 && untracked.Count > 0;
+                        changes.AddRange(untracked);
+                        if (needSort)
+                            changes.Sort((l, r) => Models.NumericSort.Compare(l.Path, r.Path));
                     }
-                    else
+
+                    Dispatcher.UIThread.Post(() =>
                     {
-                        Task.Run(async () =>
+                        if (ReferenceEquals(value, _selectedStash))
                         {
-                            var changes = await new Commands.CompareRevisions(_repo.FullPath, $"{value.SHA}^", value.SHA)
-                                .ReadAsync()
-                                .ConfigureAwait(false);
-
-                            var untracked = new List<Models.Change>();
-                            if (value.Parents.Count == 3)
-                            {
-                                untracked = await new Commands.CompareRevisions(_repo.FullPath, value.UntrackedParent, value.Parents[2])
-                                    .ReadAsync()
-                                    .ConfigureAwait(false);
-
-                                var needSort = changes.Count > 0 && untracked.Count > 0;
-                                changes.AddRange(untracked);
-                                if (needSort)
-                                    changes.Sort((l, r) => Models.NumericSort.Compare(l.Path, r.Path));
-                            }
-
-                            Dispatcher.UIThread.Post(() =>
-                            {
-                                if (value.SHA.Equals(_selectedStash?.SHA ?? string.Empty, StringComparison.Ordinal))
-                                {
-                                    _untracked = untracked;
-                                    Changes = changes;
-                                }
-                            });
-                        });
-                    }
-                }
+                            _untracked = untracked;
+                            Changes = changes;
+                        }
+                    });
+                });
             }
         }
 
@@ -123,6 +120,14 @@ namespace SourceGit.ViewModels
         public StashesPage(Repository repo)
         {
             _repo = repo;
+        }
+
+        public void RevealStash(Models.Stash stash)
+        {
+            if (!VisibleStashes.Contains(stash))
+                SearchFilter = string.Empty;
+
+            SelectedStash = stash;
         }
 
         public void ClearStashes()

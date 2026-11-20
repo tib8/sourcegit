@@ -8,6 +8,7 @@
              xmlns:c="using:SourceGit.Converters"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="SourceGit.Views.StashesPage"
+             x:Name="ThisControl"
              x:DataType="vm:StashesPage">
   <Grid SizeChanged="OnMainLayoutSizeChanged" Background="{DynamicResource Brush.SubPanel}">
     <Grid.ColumnDefinitions>
@@ -17,9 +18,9 @@
     </Grid.ColumnDefinitions>
 
     <!-- Left -->
-    <Grid Grid.Column="0" RowDefinitions="28,36,*,28,*" Background="{DynamicResource Brush.Window}">
+    <Grid Grid.Column="0" x:Name="StashListAndChanges" RowDefinitions="28,36,*,28,*" Background="{DynamicResource Brush.Window}">
       <!-- Stash Bar -->
-      <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto">
+      <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding !#ThisControl.IsEmbedded}">
         <Path Grid.Column="0" Margin="8,0,0,0" Width="14" Height="14" Fill="{DynamicResource Brush.FG2}" Data="{StaticResource Icons.Stashes}"/>
         <TextBlock Grid.Column="1" Foreground="{DynamicResource Brush.FG2}" FontWeight="Bold" Margin="4,0,0,0">
           <Run Text="{DynamicResource Text.Stashes.Stashes}"/>
@@ -35,7 +36,8 @@
       </Grid>
 
       <!-- Search Bar -->
-      <Border Grid.Row="1" BorderThickness="0,1" BorderBrush="{DynamicResource Brush.Border0}">
+      <Border Grid.Row="1" BorderThickness="0,1" BorderBrush="{DynamicResource Brush.Border0}"
+              IsVisible="{Binding !#ThisControl.IsEmbedded}">
         <TextBox Height="24"
                  Margin="4,0"
                  BorderThickness="1"
@@ -74,6 +76,7 @@
                SelectedItem="{Binding SelectedStash, Mode=TwoWay}"
                SelectionMode="Single"
                KeyDown="OnStashListKeyDown"
+               IsVisible="{Binding !#ThisControl.IsEmbedded}"
                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                ScrollViewer.VerticalScrollBarVisibility="Auto">
         <ListBox.Styles>

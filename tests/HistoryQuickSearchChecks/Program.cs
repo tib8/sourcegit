@@ -4,6 +4,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -54,6 +56,13 @@ internal static class Program
             Git(fixture, "commit", "--allow-empty", "-m", "Outside the loaded history");
             var outside = Git(fixture, "rev-parse", "HEAD").Trim();
             Git(fixture, "checkout", "main");
+            if (args is ["--stashes-only", var previewDirectory])
+            {
+                CheckStashHistory(fixture, previewDirectory);
+                Console.WriteLine($"Passed {_checks} stash history checks.");
+                return;
+            }
+
             var commits = new QueryCommits(fixture, "HEAD").GetResultAsync().GetAwaiter().GetResult();
             Check(Search(fixture, commits, first[..12].ToUpperInvariant()).SetEquals([first]), "SHA prefix ignores case");
             Check(Search(fixture, commits, first.Substring(8, 14)).Count == 0, "interior SHA does not match");
@@ -368,6 +377,7 @@ internal static class Program
             Preferences.Instance.WorkingDirectoryHeadMode = 0;
             window.Close();
             histories.CancelQuickSearch();
+            CheckStashHistory(fixture, args.Length == 0 ? null : Path.GetDirectoryName(args[0]));
             Console.WriteLine($"Passed {_checks} history quick search checks.");
         }
         finally
@@ -380,6 +390,182 @@ internal static class Program
             foreach (var file in Directory.EnumerateFiles(fixture, "*", SearchOption.AllDirectories))
                 File.SetAttributes(file, FileAttributes.Normal);
             Directory.Delete(fixture, true);
+        }
+    }
+
+    private static void CheckStashHistory(string fixture, string previewDirectory)
+    {
+        Git(fixture, "checkout", "other");
+        File.WriteAllText(Path.Combine(fixture, "outside.txt"), "from another branch\n");
+        Git(fixture, "stash", "push", "-u", "-m", "Other branch stash");
+        Git(fixture, "checkout", "main");
+        Git(fixture, "branch", "-D", "other");
+        var head = Git(fixture, "rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Combine(fixture, "staged.txt"), "staged\n");
+        Git(fixture, "add", "staged.txt");
+        Git(fixture, "stash", "push", "-m", "Staged stash");
+        File.WriteAllText(Path.Combine(fixture, "untracked.txt"), "untracked\n");
+        Git(fixture, "stash", "push", "-u", "-m", "Untracked stash");
+
+        Preferences.Instance.MaxHistoryCommits = 1;
+        Preferences.Instance.WorkingDirectoryHeadMode = 0;
+        var repo = new Repository(false, fixture, Path.Combine(fixture, ".git"));
+        repo.UIStates.FocusOnCurrentBranch = true;
+        repo.Open();
+        var view = new SourceGit.Views.Repository { DataContext = repo };
+        var window = new Window { Width = 1140, Height = 720, Content = view };
+        window.Show();
+        SetWindowActive(window, true);
+        try
+        {
+            WaitFor(() => repo.StashesCount == 3 && !repo.Histories.IsLoading && repo.Histories.Graph != null);
+            var sidebar = view.FindControl<ListBox>("SidebarStashList")!;
+            var worktrees = view.FindControl<ListBox>("WorktreeList")!;
+            var histories = repo.Histories;
+            Check(!sidebar.IsVisible && histories.Entries.Count == 1,
+                $"stash display defaults to off in both views (sidebar {sidebar.IsVisible}, rows {histories.Entries.Count})");
+
+            var history = window.GetVisualDescendants().OfType<HistoryView>().Single();
+            var options = history.GetVisualDescendants().OfType<Button>()
+                .Single(button => Equals(ToolTip.GetTip(button), SourceGit.App.Text("Histories.AdvancedOptions")));
+            ContextMenu opened = null;
+            using var subscription = ContextMenu.OpenedEvent.AddClassHandler<ContextMenu>((menu, _) => opened = menu);
+            void ToggleStashes()
+            {
+                options.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                WaitFor(() => opened != null);
+                var item = opened.Items.OfType<MenuItem>().Single(menu => Equals(menu.Header, "Show stashes"));
+                item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                opened.Close();
+                opened = null;
+                Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+            }
+
+            ToggleStashes();
+            Check(sidebar.IsVisible && sidebar.ItemCount == 3 && Grid.GetRow(sidebar) + 2 == Grid.GetRow(worktrees),
+                "Advanced Options shows the full sidebar list above worktrees");
+            var entries = histories.Entries.OfType<StashHistoryEntry>().ToArray();
+            Check(histories.Commits.Single().SHA == head && entries.Length == 2 && histories.Entries[^1] is Commit,
+                "only stashes with visible first parents get rows and the commit limit stays intact");
+            var graph = histories.Graph;
+            var connector = graph.Paths.Single(path => path.Points[^1] == graph.Dots[2].Center &&
+                path.Points[0].Y == graph.Dots[0].Center.Y);
+            Check(graph.Dots.Count == histories.Entries.Count && graph.Dots.Take(2).All(dot => dot.Type == CommitGraph.DotType.Stash) &&
+                graph.Dots[0].Center.X == graph.Dots[1].Center.X &&
+                connector.IsDashed && graph.Links.Count(link => link.End.X == connector.Points[0].X && link.IsDashed) == 2,
+                "stashes share one lane and each connects to its first parent with a dashed line");
+
+            var row = sidebar.GetVisualDescendants().OfType<ListBoxItem>().Single(item => item.DataContext == entries[0].Stash);
+            var group = view.FindControl<Grid>("LeftSidebarGroups")!.Children.OfType<Avalonia.Controls.Primitives.ToggleButton>()
+                .Single(button => Grid.GetRow(button) == Grid.GetRow(sidebar) - 1);
+            var headerIcon = ((Grid)group.Content!).Children.OfType<Avalonia.Controls.Shapes.Path>().Single();
+            var stashIcon = row.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single();
+            var headerX = headerIcon.TranslatePoint(default, view)!.Value.X;
+            var stashX = stashIcon.TranslatePoint(default, view)!.Value.X;
+            Check(Math.Abs(headerX - stashX) < 1, $"sidebar stash icons line up with the group icon ({stashX} and {headerX})");
+
+            void CheckStashContextMenu(Point position, SourceGit.Models.Stash expected, string label)
+            {
+                window.MouseDown(position, MouseButton.Right, RawInputModifiers.None);
+                window.MouseUp(position, MouseButton.Right, RawInputModifiers.None);
+                WaitFor(() => opened != null);
+                var items = opened.Items.OfType<MenuItem>().Where(item => !Equals(item.Header, "-")).ToArray();
+                Check(items.Select(item => item.Header).SequenceEqual(new object[]
+                {
+                    SourceGit.App.ContextMenuText("StashCM.Apply"), SourceGit.App.Text("StashCM.Branch"),
+                    SourceGit.App.ContextMenuText("StashCM.Drop"), SourceGit.App.Text("StashCM.SaveAsPatch"), SourceGit.App.Text("StashCM.CopyMessage"),
+                }), label);
+                items[^1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                WaitFor(() => window.Clipboard!.TryGetTextAsync().GetAwaiter().GetResult() == expected.Message);
+                opened.Close();
+                opened = null;
+                window.MouseMove(new Point(800, 350), RawInputModifiers.None);
+                Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+            }
+
+            var point = row.TranslatePoint(new Point(26, 12), window)!.Value;
+            window.MouseDown(point, MouseButton.Left, RawInputModifiers.None);
+            window.MouseUp(point, MouseButton.Left, RawInputModifiers.None);
+            WaitFor(() => histories.DetailContext is StashesPage page && page.DiffContext?.Content != null);
+            var details = (StashesPage)histories.DetailContext;
+            var grid = history.FindControl<DataGrid>("CommitListContainer")!;
+            Check(repo.IsDashboardVisible && grid.SelectedItems.Count == 1 && grid.SelectedItems[0] == entries[0] &&
+                details.Changes.Single().Path == "untracked.txt" && !repo.StashesPage.SearchFilter.Any(),
+                "sidebar click selects the stash row and shows the proper untracked-file diff");
+            var graphView = history.FindControl<SourceGit.Views.CommitGraph>("CommitGraph")!;
+            var stashDot = histories.Graph.Dots[1].Center;
+            var layout = graphView.Layout;
+            var marker = graphView.TranslatePoint(new Point(stashDot.X, stashDot.Y * layout.RowHeight - layout.StartY), window)!.Value;
+            CheckStashContextMenu(marker, entries[1].Stash, "right-click on the graph marker opens the usual menu for that stash");
+            CheckStashContextMenu(point, entries[0].Stash, "sidebar right-click opens the usual menu for the clicked stash");
+            grid.SelectedItem = entries[1];
+            WaitFor(() => details.DiffContext is { FilePath: "staged.txt", Content: not null });
+            var stashRow = grid.GetVisualDescendants().OfType<DataGridRow>().Single(row => row.DataContext == entries[1]);
+            Check(histories.SelectedStashEntry == entries[1] && histories.SelectedCommits.Count == 0 &&
+                !stashRow.GetVisualDescendants().OfType<TextBlock>().Any(text => text.Text?.Contains(nameof(StashHistoryEntry), StringComparison.Ordinal) == true),
+                "selecting a graph stash shows its own diff rather than commit details");
+
+            if (previewDirectory != null)
+            {
+                window.MouseMove(new Point(800, 350), RawInputModifiers.None);
+                Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                using var frame = window.CaptureRenderedFrame();
+                frame!.Save(Path.Combine(previewDirectory, "stash-graph-preview.png"));
+                Application.Current!.RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light;
+                histories.IsTreeColumnVisible = false;
+                Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                using var mergedFrame = window.CaptureRenderedFrame();
+                mergedFrame!.Save(Path.Combine(previewDirectory, "stash-graph-merged-preview.png"));
+            }
+
+            Git(fixture, "stash", "drop", "stash@{0}");
+            repo.RefreshStashes();
+            WaitFor(() => repo.StashesCount == 2 && histories.Graph?.Dots.Count == 2 &&
+                histories.SelectedStashEntry?.Stash.Name == "stash@{0}");
+            Check(sidebar.ItemCount == 2 && histories.SelectedStashEntry.Stash.SHA == entries[1].Stash.SHA,
+                "stash refresh updates both views and restores selection when selectors renumber");
+
+            histories.QuickSearchText = head[..12];
+            histories.IsQuickSearchFilterEnabled = true;
+            WaitFor(() => !histories.IsQuickSearching && histories.DisplayedCommits.Count == 1);
+            window.UpdateLayout();
+            var otherItem = sidebar.GetVisualDescendants().OfType<ListBoxItem>().Single(item =>
+                item.DataContext is SourceGit.Models.Stash stash && stash.Subject.Contains("Other branch stash", StringComparison.Ordinal));
+            var otherStash = (SourceGit.Models.Stash)otherItem.DataContext!;
+            var otherPoint = otherItem.TranslatePoint(new Point(26, 12), window)!.Value;
+            window.MouseDown(otherPoint, MouseButton.Left, RawInputModifiers.None);
+            window.MouseUp(otherPoint, MouseButton.Left, RawInputModifiers.None);
+            WaitFor(() => histories.DetailContext is StashesPage { DiffContext: { FilePath: "outside.txt", Content: not null } });
+            var baseCommit = histories.DisplayedCommits.Single(commit => commit.SHA == otherStash.Parents[0]);
+            var baseRow = histories.Entries.IndexOf(baseCommit);
+            Check(repo.IsDashboardVisible && grid.SelectedItem == histories.SelectedStashEntry &&
+                histories.SelectedStashEntry.Stash.SHA == otherStash.SHA && histories.Entries[baseRow - 1] == histories.SelectedStashEntry &&
+                histories.Graph.Paths.Any(path => path.IsDashed && path.Points[^1] == histories.Graph.Dots[baseRow].Center),
+                "clicking a stash from a deleted branch reveals its real base and selects it in the graph");
+            Check(repo.FocusOnCurrentBranch && histories.IsQuickSearchFilterActive && histories.Commits.Single().SHA == head,
+                "revealing an out-of-scope stash preserves branch focus, quick search and the loaded commit limit");
+
+            var beforeRefresh = histories.Commits;
+            repo.RefreshCommits();
+            WaitFor(() => !histories.IsLoading && !ReferenceEquals(histories.Commits, beforeRefresh) && !histories.IsQuickSearching);
+            Check(histories.SelectedStashEntry?.Stash.SHA == otherStash.SHA && histories.DisplayedCommits.Count == 2,
+                "ordinary history refresh retains the explicitly revealed stash");
+
+            ToggleStashes();
+            Check(!sidebar.IsVisible && histories.Entries.Count == 1 && histories.Graph.Dots.Count == 1 &&
+                histories.SelectedStashEntry == null, "turning off the shared option removes both stash displays and clears the selection");
+        }
+        finally
+        {
+            window.Close();
+            repo.Close();
+            Dispatcher.UIThread.RunJobs();
         }
     }
 

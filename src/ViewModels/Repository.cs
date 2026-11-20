@@ -340,6 +340,33 @@ namespace SourceGit.ViewModels
             }
         }
 
+        public bool ShowStashes
+        {
+            get => !IsBare && _uiStates is { ShowStashes: true };
+            set
+            {
+                if (IsBare || _uiStates == null || _uiStates.ShowStashes == value)
+                    return;
+
+                _uiStates.ShowStashes = value;
+                OnPropertyChanged();
+                _histories?.RefreshStashRows();
+            }
+        }
+
+        public bool IsStashGroupExpanded
+        {
+            get => _uiStates.IsStashExpandedInSideBar;
+            set
+            {
+                if (value == _uiStates.IsStashExpandedInSideBar)
+                    return;
+
+                _uiStates.IsStashExpandedInSideBar = value;
+                OnPropertyChanged();
+            }
+        }
+
         public bool IsWorktreeGroupExpanded
         {
             get => _uiStates.IsWorktreeExpandedInSideBar;
@@ -1507,7 +1534,30 @@ namespace SourceGit.ViewModels
                     _stashesPage.Stashes = stashes;
 
                 StashesCount = stashes.Count;
+                if (ShowStashes)
+                    _histories?.RefreshStashRows();
             }, DispatcherPriority.Background);
+        }
+
+        public async Task OpenStashAsync(Models.Stash stash)
+        {
+            if (!_stashesPage.Stashes.Contains(stash))
+                return;
+
+            if (ShowStashes)
+            {
+                SelectedViewIndex = 0;
+                await _histories.RevealStashAsync(stash);
+                return;
+            }
+
+            OpenStashPage(stash);
+        }
+
+        internal void OpenStashPage(Models.Stash stash)
+        {
+            SelectedViewIndex = 2;
+            _stashesPage.RevealStash(stash);
         }
 
         public void CreateNewBranch()

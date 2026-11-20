@@ -226,6 +226,9 @@ namespace SourceGit.Models
             set;
         } = false;
 
+        public bool ShowStashes { get; set; }
+        public bool IsStashExpandedInSideBar { get; set; } = true;
+
         public List<string> ExpandedBranchNodesInSideBar
         {
             get;
